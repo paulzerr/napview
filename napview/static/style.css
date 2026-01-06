@@ -1,25 +1,73 @@
+:root {
+    --scale: 1;
+    --base-unit: 16px;
+    --base-font: 16px;
+
+    --unit: calc(var(--base-unit) * var(--scale));
+    --font-size: calc(var(--base-font) * var(--scale));
+
+    --radius: calc(12px * var(--scale));
+    --gap: calc(var(--unit) * 1.5);
+    --text-color: #ffffff;
+    --surface: #1e1e1e;
+    --frame-border: #333333;
+    --shadow: 0 calc(6px * var(--scale)) calc(18px * var(--scale)) rgba(0, 0, 0, 0.5);
+    --background: #121212;
+}
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+html,
 body {
-    margin: 0;
-    padding: 0;
+    height: 100%;
+}
+
+body {
     display: flex;
-    justify-content: center; /* Center horizontally */
-    align-items: center;    /* Center vertically */    
+    justify-content: center;
+    align-items: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    font-size: var(--font-size);
+    color: var(--text-color);
+    background: var(--background);
+    overflow: hidden;
+}
+
+.chart-container {
+    width: 100vw;
     height: 100vh;
-    background-color: #121212; /* Very dark gray */
-    color: #ffffff; /* White text for contrast */
+    display: flex;
+    gap: var(--gap);
+    align-items: stretch;
+    justify-content: center;
+}
+
+.chart-block {
+    width: calc(50vw - (var(--gap) / 2));
+    height: calc(50vh - (var(--gap) / 2));
+    background: var(--surface);
+    border: 1px solid var(--frame-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.chart-block canvas {
+    width: 100% !important;
+    height: 100% !important;
 }
 
 .sidebar {
     width: 15%;
-    background-color: #1e1e1e; /* Dark gray */
-    padding: 20px;
-    box-sizing: border-box;
+    background-color: #1e1e1e;
+    padding: calc(var(--unit) * 1.25);
     color: #ffffff;
 }
 
@@ -28,57 +76,32 @@ body {
 .sidebar textarea,
 .sidebar select {
     width: 100%;
-    padding: 5px;
-    margin: 5px 0;
-    box-sizing: border-box;
+    padding: calc(var(--unit) * 0.4);
+    margin: calc(var(--unit) * 0.3) 0;
     background-color: #333333;
     color: #ffffff;
     border: 1px solid #444444;
 }
 
 .sidebar p.title {
-    font-size: 18px;
-    font-weight: bold;
+    font-size: calc(var(--font-size) * 1.1);
+    font-weight: 600;
     color: #ffffff;
-    margin-bottom: 20px;
+    margin-bottom: calc(var(--unit) * 1.2);
     text-align: center;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding: 0 10px;
-}
-
-.chart-container {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(2, 1fr);
-    gap: 2px;
-    width: 95%;
-    height: 95%;
-    box-sizing: border-box;
-    overflow: hidden;
-    background-color: #121212;
-}
-
-.chart-block {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #1e1e1e;
-    border: 1px solid #333333; /* Slightly lighter gray for borders */
-}
-
-.chart-block canvas {
-    width: 100% !important;
-    height: 100% !important;
+    padding: 0 calc(var(--unit) * 0.6);
 }
 
 button {
     background-color: #333333;
     color: #ffffff;
     border: none;
-    padding: 10px;
+    padding: calc(var(--unit) * 0.6);
     cursor: pointer;
-    margin-top: 10px;
+    margin-top: calc(var(--unit) * 0.6);
+    border-radius: calc(var(--radius) * 0.7);
 }
 
 button:hover {
@@ -99,12 +122,14 @@ button:hover {
 .modal-content {
     background-color: #1e1e1e;
     margin: 10% auto;
-    padding: 20px;
+    padding: calc(var(--unit) * 1.2);
     width: 80%;
     max-width: 800px;
     max-height: 80%;
     overflow-y: auto;
     color: #ffffff;
+    border-radius: calc(var(--radius) * 0.9);
+    box-shadow: var(--shadow);
 }
 
 .modal-content h2 {
@@ -115,11 +140,10 @@ button:hover {
 .checkbox-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 10px;
+    gap: calc(var(--unit) * 0.6);
 }
 
 /* d3 style stuff */
-
 .grid line {
     stroke: lightgray;
     stroke-opacity: 0.7;
@@ -129,10 +153,6 @@ button:hover {
 .grid path {
     stroke-width: 0;
 }
-/* 
-.legend rect {
-    fill: #333333;
-} */
 
 .legend text {
     fill: #ffffff;
