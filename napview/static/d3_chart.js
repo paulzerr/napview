@@ -98,11 +98,12 @@ svg.append("text")
 
     const gX = svg.append("g")
         .attr("class", "x-axis grid")
-        .attr("transform", `translate(0,${height})`)
+        .attr("transform", `translate(0.5,${height + 0.5})`)
         .call(xAxis);
 
     const gY = svg.append("g")
         .attr("class", "y-axis grid")
+        .attr("transform", "translate(0.5,0.5)")
         .call(yAxis);
 
 
@@ -147,6 +148,27 @@ svg.append("text")
 
     addLegend(svg, width, height, labels, colors);
 
+    function render(data, newXScale) {
+        const flatData = data.flat();
+        if (flatData.length === 0) {
+            return;
+        }
+
+        yScale.domain([0, d3.max(flatData, d => d.y)]);
+
+        const xTicks = newXScale.ticks(numberOfXTicks);
+        gX.call(xAxis.scale(newXScale).tickValues(xTicks));
+        gY.call(yAxis.scale(yScale));
+
+        const line = d3.line()
+            .x(d => newXScale(d.x))
+            .y(d => yScale(d.y))
+            .curve(d3.curveLinear);
+
+        svg.selectAll(".line")
+            .attr("d", (d, i) => line(data[i]));
+    }
+
     function updateChart(data) {
         chartsState[containerId].data = data;
         const flatData = data.flat();
@@ -160,26 +182,14 @@ svg.append("text")
         } else {
             newXScale = xScale;
         }
-        
+
         const oldDomainStart = newXScale.domain()[0].getTime();
         const oldDomainEnd = newXScale.domain()[1].getTime();
-        const latestDataPoint = d3.max(data.flat(), d => d.x);
+        const latestDataPoint = d3.max(flatData, d => d.x);
         const domainShift = latestDataPoint - oldDomainEnd;
         newXScale.domain([oldDomainStart + domainShift, latestDataPoint]);
-    
-        gX.call(xAxis.scale(newXScale));
-    
-        yScale.domain([0, d3.max(flatData, d => d.y)]);
 
-        const line = d3.line()
-            .x(d => newXScale(d.x))
-            .y(d => yScale(d.y))
-            .curve(d3.curveLinear);
-
-        svg.selectAll(".line")
-            .attr("d", (d, i) => line(data[i]));
-    
-        gY.call(yAxis.scale(yScale));
+        render(data, newXScale);
     }
 
     function zoomed(event) {
@@ -194,13 +204,7 @@ svg.append("text")
         const domainShift = latestDataPoint - newDomainEnd;
         newXScale.domain([newDomainStart + domainShift, latestDataPoint]);
 
-        gX.call(xAxis.scale(newXScale));
-        const line = d3.line()
-            .x(d => newXScale(d.x))
-            .y(d => yScale(d.y))
-            .curve(d3.curveLinear);
-        svg.selectAll(".line")
-            .attr("d", (d, i) => line(data[i]));
+        render(data, newXScale);
 
         // call the zoomed function for all charts
         Object.keys(chartsState).forEach(id => {

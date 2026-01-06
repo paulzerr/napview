@@ -13,6 +13,7 @@
     --frame-border: #333333;
     --shadow: 0 calc(6px * var(--scale)) calc(18px * var(--scale)) rgba(0, 0, 0, 0.5);
     --background: #121212;
+    --page-margin: calc(var(--unit) * 1.2);
 }
 
 * {
@@ -35,11 +36,12 @@ body {
     color: var(--text-color);
     background: var(--background);
     overflow: hidden;
+    padding: var(--page-margin);
 }
 
 .chart-container {
-    width: 100vw;
-    height: 100vh;
+    width: calc(100vw - (var(--page-margin) * 2));
+    height: calc(100vh - (var(--page-margin) * 2));
     display: flex;
     gap: var(--gap);
     align-items: stretch;
@@ -157,7 +159,11 @@ button:hover {
 .grid line {
     stroke: lightgray;
     stroke-opacity: 0.7;
-    shape-rendering: crispEdges;
+}
+
+.x-axis text,
+.y-axis text {
+    font-size: 17px;
 }
 
 .grid path {
