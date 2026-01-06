@@ -1,9 +1,14 @@
 let chartsState = {};
 
 export function createChart(containerId, data, colors, labels) {
-    const svgWidth = document.getElementById(containerId).clientWidth;
-    const svgHeight = document.getElementById(containerId).clientHeight;
-    const margin = { top: 30, right: 30, bottom: 40, left: 50 };
+    const container = document.getElementById(containerId);
+    const placeholder = container ? container.querySelector(".chart-placeholder") : null;
+    if (placeholder) {
+        placeholder.remove();
+    }
+    const svgWidth = container.clientWidth;
+    const svgHeight = container.clientHeight;
+    const margin = { top: 30, right: 30, bottom: 70, left: 90 };
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 
@@ -33,17 +38,19 @@ export function createChart(containerId, data, colors, labels) {
 
 svg.append("text")
     .attr("transform", "rotate(-90)")
-    .attr("y", 0 - margin.left)
+    .attr("y", 0 - (margin.left - 6))
     .attr("x", 0 - height / 2)
     .attr("dy", "1em")
     .style("text-anchor", "middle")
+    .style("font-size", "24px")
     .style("fill", "#ffffff") // White text
     .text(labels[0]);
 
 svg.append("text")
     .attr("x", width / 2)
-    .attr("y", height + (margin.bottom * 0.9))
+    .attr("y", height + (margin.bottom * 0.8))
     .style("text-anchor", "middle")
+    .style("font-size", "24px")
     .style("fill", "#ffffff") // White text
     .text("Time");
 
@@ -102,10 +109,10 @@ svg.append("text")
 
 //////////////////////////////
     gX.selectAll("text")
-        .style("font-size", "12px");
+        .style("font-size", "17px");
     
     gY.selectAll("text")
-        .style("font-size", "12px");
+        .style("font-size", "17px");
 //////////////////////////////
 
 
@@ -120,7 +127,7 @@ svg.append("text")
             .datum(lineData)
             .attr("fill", "none")
             .attr("stroke", colors[i])
-            .attr("stroke-width", 1.5)
+            .attr("stroke-width", 2.5)
             .attr("class", "line")
             .attr("clip-path", "url(#clip)")
             .attr("d", line);
@@ -256,13 +263,13 @@ svg.append("text")
 
 
 export function addLegend(svg, width, height, labels, colors) {
-    const legendWidth = width * 0.15;
-    const itemSpacing = width * 0.02;
-    const itemWidth = width * 0.02;
-    const itemHeight = width * 0.02;
-    const labelOffset = width * 0.03;
-    const labelFontSize = width * 0.025;
-    const legendPadding = width * 0.01;
+    const legendWidth = width * 0.12;
+    const itemSpacing = width * 0.015;
+    const itemWidth = width * 0.017;
+    const itemHeight = width * 0.017;
+    const labelOffset = width * 0.024;
+    const labelFontSize = width * 0.019;
+    const legendPadding = width * 0.009;
 
     const legendHeight = (labels.length - 2) * (itemHeight + itemSpacing) + legendPadding * 2;
     const legendX = width * 0.01;
