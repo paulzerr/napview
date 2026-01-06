@@ -1,0 +1,7 @@
+ignore_this_folder/
+data/
+*.log
+*.bak
+__pycache__/
+*.tmp
+*.edf
