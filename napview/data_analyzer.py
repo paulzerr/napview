@@ -64,14 +64,35 @@ class Analyzer:
         return epoch_data.astype(np.float64)
 
     def volts_to_microvolts(self,data):
-        return data*1e6
+        if data is None:
+            return None
+        if data.ndim == 1:
+            median = np.median(data)
+            q25 = np.quantile(np.abs(data - median), 0.25)
+            m_value = q25
+        else:
+            medians = np.median(data, axis=1, keepdims=True)
+            q25 = np.quantile(np.abs(data - medians), 0.25, axis=1)
+            m_value = np.median(q25)
+        return data * 1e6 if m_value < 1e-2 else data
 
     def predict_sleep_stage(self, start_idx, end_idx, timestamp):
         analysis_result = {'timestamp': timestamp}
         results_probabilities = np.zeros(5)
         try:
             all_data_uv = self.volts_to_microvolts(self.get_data(start_idx, end_idx))
-
+            if all_data_uv is None:
+                self.logger.warning(f"Analyzer ({self.mode}): No data retrieved for indices {start_idx} to {end_idx}.")
+                return None
+            
+            samples_per_epoch = self.epoch_length * self.eeginfo.sample_rate
+            if all_data_uv.shape[-1] < (6 * samples_per_epoch):
+                self.logger.warning(
+                    f"Analyzer ({self.mode}): Not enough samples yet. Waiting for more data."
+                )
+                time.sleep(1)
+                return None
+            
             scorer = NIDRA.scorer(
                 type='psg',
                 input=all_data_uv,
