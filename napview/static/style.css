@@ -1,7 +1,7 @@
 :root {
     --scale: 1;
     --base-unit: 16px;
-    --base-font: 16px;
+    --base-font: 18px;
 
     --unit: calc(var(--base-unit) * var(--scale));
     --font-size: calc(var(--base-font) * var(--scale));

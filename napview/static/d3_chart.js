@@ -65,15 +65,19 @@ svg.append("text")
     const numberOfXTicks = Math.max(3, Math.min(6, Math.floor(width / 100)));
     const numberOfYTicks = Math.max(3, Math.min(6, Math.floor(height / 30)));
 
-    const dataMax = d3.max(data.flat(), d => d.x);
-    const dataMin = d3.min(data.flat(), d => d.x);
+    const flatData = data.flat();
+    const hasData = flatData.length > 0;
+    const now = Date.now();
+    const dataMax = hasData ? d3.max(flatData, d => d.x) : now;
+    const dataMin = hasData ? d3.min(flatData, d => d.x) : now - 1000;
+    const yMax = hasData ? d3.max(flatData, d => d.y) : 1;
 
     const xScale = d3.scaleTime()
         .domain([new Date(dataMin), new Date(dataMax)])
         .range([0, width]);
 
     const yScale = d3.scaleLinear()
-        .domain([0, d3.max(data.flat(), d => d.y)])
+        .domain([0, yMax])
         .range([height, 0]);
 
     const xAxis = d3.axisBottom(xScale)
@@ -138,6 +142,10 @@ svg.append("text")
 
     function updateChart(data) {
         chartsState[containerId].data = data;
+        const flatData = data.flat();
+        if (flatData.length === 0) {
+            return;
+        }
 
         let newXScale;
         if (chartsState[containerId].currentZoomState) {
@@ -154,6 +162,8 @@ svg.append("text")
     
         gX.call(xAxis.scale(newXScale));
     
+        yScale.domain([0, d3.max(flatData, d => d.y)]);
+
         const line = d3.line()
             .x(d => newXScale(d.x))
             .y(d => yScale(d.y))
@@ -162,7 +172,6 @@ svg.append("text")
         svg.selectAll(".line")
             .attr("d", (d, i) => line(data[i]));
     
-        yScale.domain([0, d3.max(data.flat(), d => d.y)]);
         gY.call(yAxis.scale(yScale));
     }
 
@@ -292,4 +301,12 @@ export function addLegend(svg, width, height, labels, colors) {
         .attr("alignment-baseline", "middle")
         .attr("fill", "#ffffff") // Ensure text is visible
         .text(d => d);
+}
+
+export function resetChart(containerId) {
+    delete chartsState[containerId];
+    const container = document.getElementById(containerId);
+    if (container) {
+        container.innerHTML = "";
+    }
 }

@@ -1,4 +1,4 @@
-import { createChart } from './d3_chart.js';
+import { createChart, resetChart } from './d3_chart.js';
 
 class DataPlotter {
     constructor(chartId, config) {
@@ -6,6 +6,16 @@ class DataPlotter {
         this.config = config;
         this.chart = null;
         this.dataSets = null;
+    }
+
+    containerReady() {
+        const el = document.getElementById(this.chartId);
+        return el && el.clientWidth > 0 && el.clientHeight > 0;
+    }
+
+    reset() {
+        resetChart(this.chartId);
+        this.chart = null;
     }
 
     async plotChart() {
@@ -22,14 +32,15 @@ class DataPlotter {
                 this.dataSets.push(fieldData);
             }
 
-            //if (this.hasEnoughData()) {
-                
-                if (!this.chart) {
-                    this.chart = createChart(this.chartId, this.dataSets, this.config.colors, this.config.labels);
-                } else {
-                    this.chart.update(this.dataSets);
-                }
-            //}
+            if (!this.containerReady() || !this.hasEnoughData()) {
+                return;
+            }
+
+            if (!this.chart) {
+                this.chart = createChart(this.chartId, this.dataSets, this.config.colors, this.config.labels);
+            } else {
+                this.chart.update(this.dataSets);
+            }
     }
 
     hasEnoughData() {
@@ -88,3 +99,14 @@ chart1Plotter.startPlotting();
 chart2Plotter.startPlotting();
 // chart3Plotter.startPlotting();
 // chart4Plotter.startPlotting();
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+    if (resizeTimer) {
+        clearTimeout(resizeTimer);
+    }
+    resizeTimer = setTimeout(() => {
+        chart1Plotter.reset();
+        chart2Plotter.reset();
+    }, 150);
+});
