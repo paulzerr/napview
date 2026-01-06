@@ -7,9 +7,9 @@ import sys
 # Ensure pylsl can find the bundled liblsl before any imports.
 HERE = pathlib.Path(__file__).resolve().parent
 LSL_LIB_BY_PLATFORM = {
-    "linux": "liblsl.so",
-    "darwin": "liblsl.dylib",
-    "win32": "liblsl.dll",
+    "linux": "libs/liblsl.so",
+    "darwin": "libs/liblsl.dylib",
+    "win32": "libs/liblsl.dll",
 }
 lib_name = LSL_LIB_BY_PLATFORM.get(sys.platform)
 if lib_name:

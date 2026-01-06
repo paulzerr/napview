@@ -45,8 +45,6 @@ class Analyzer:
         # Calculate start of the window
         start_idx_window = max(0, end_idx - context_duration_seconds * self.eeginfo.sample_rate)
         
-
-
         # Align the start index to the beginning of an epoch boundary.
         samples_per_epoch = self.epoch_length * self.eeginfo.sample_rate
         aligned_start_idx = (start_idx_window // samples_per_epoch) * samples_per_epoch
