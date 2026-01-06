@@ -9,5 +9,7 @@
     "db_file_path": "",
     "board_type": "Synthetic",
     "openbci_port": "COM3",
-    "lsl_stream_name": "napview_EEG_stream"
+    "lsl_stream_name": "napview_EEG_stream",
+    "record_name": "night_1",
+    "separate_session_log": true
 }

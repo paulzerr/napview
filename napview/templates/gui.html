@@ -11,9 +11,11 @@
 <script>
   const DESIGN_WIDTH = 1920;
   const DESIGN_HEIGHT = 1080;
+  const SCALE_MULTIPLIER = 1.1;
 
   function updateScale() {
-    const scale = Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
+    const baseScale = Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
+    const scale = baseScale * SCALE_MULTIPLIER;
     document.documentElement.style.setProperty('--scale', scale.toFixed(3));
   }
 
@@ -131,6 +133,9 @@
     margin: 0 auto var(--spacing-medium) auto;
   }
   .control-group.spaced {
+    margin-bottom: calc(var(--spacing-medium) + 8px);
+  }
+  .control-group.spaced {
     margin-bottom: var(--spacing-large);
   }
   /* Labels */
@@ -139,6 +144,7 @@
     text-align: left;
     font-size: var(--font-size-base);
     margin-right: var(--label-margin-right);
+    margin-bottom: 4px;
   }
   /* Input fields */
   .input-field,
@@ -179,6 +185,9 @@
     border: 1px solid var(--color-status-border);
     padding: var(--status-label-padding);
     font-family: 'Courier New', Courier, monospace;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
     margin-top: var(--spacing-large);
     width: var(--input-width);
     margin: var(--spacing-medium) auto 0 auto;
@@ -193,9 +202,18 @@
   .file-input-row {
     display: flex;
     gap: var(--spacing-medium);
-    align-items: center;
+    align-items: baseline;
     width: var(--input-width);
     margin: 0 auto;
+  }
+  .file-input-row + .file-input-row {
+    margin-top: 2px;
+  }
+  .file-input-row .label {
+    flex: 0 0 18ch;
+    text-align: left;
+    margin-right: 0;
+    padding-right: var(--spacing-small);
   }
   .file-input-row .button {
     flex: 1;
@@ -299,7 +317,7 @@
 
       <div id="ipControl" class="control-group" style="display: none;">
         <div class="file-input-row">
-          <label for="amp_ip" class="label">EEG Amplifier IP: &nbsp; &nbsp;</label>
+            <label for="amp_ip" class="label">EEG Amplifier IP:</label>
           <input id="amp_ip" type="text" class="input-field">
           
         </div>

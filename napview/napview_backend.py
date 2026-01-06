@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timezone
 import json
 import shutil
+import logging
 import multiprocessing
 multiprocessing.set_start_method('spawn', True)
 import threading
@@ -122,6 +123,37 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
             if self.path == '/start':
                 ready = True
                 self.config = self.config_manager.load_config(instance=self)
+                separate_session_log = self.config.get('separate_session_log', True)
+                if separate_session_log:
+                    record_name = self.config.get('record_name')
+                    if not record_name or not str(record_name).strip():
+                        self.logger.error("GUI: start_attempt: missing record name")
+                        response = {'status': 'error', 'message': 'Record name is required'}
+                        ready = False
+                    if ready:
+                        safe_record_name = ''.join(
+                            c if c.isalnum() or c in ('-', '_') else '_'
+                            for c in str(record_name).strip()
+                        ).strip('_')
+                        if not safe_record_name:
+                            self.logger.error("GUI: start_attempt: invalid record name")
+                            response = {'status': 'error', 'message': 'Record name is invalid'}
+                            ready = False
+                        else:
+                            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                            log_filename = f"napview_log_{safe_record_name}_{timestamp}.log"
+                            temp_log_path = Path(self.base_path) / "napview_log_temp.log"
+                            session_log_path = Path(self.base_path) / log_filename
+                            for handler in self.logger.handlers:
+                                if isinstance(handler, logging.FileHandler):
+                                    handler.flush()
+                            if not temp_log_path.exists():
+                                raise FileNotFoundError(f"Temp log file not found at {temp_log_path}")
+                            with open(temp_log_path, 'r') as src, open(session_log_path, 'w') as dst:
+                                dst.write(src.read())
+                            self.config_manager.save_config({'log_file_name': log_filename})
+                            self.logger = configure_logger(self.base_path, log_filename=log_filename, force=True)
+                            temp_log_path.unlink()
 
                 if self.config.get('eeg_amp') == 'Simulator' and not self.validate_eeg_file():
                     self.logger.error(f"GUI: start_attempt: invalid EEG file")
@@ -387,7 +419,8 @@ def main():
     #########################################
     ###  START LOGGER
     #logger_timestamp = time.strftime('%Y%m%d_%H%M%S')
-    logger = configure_logger(base_path) 
+    temp_log_filename = "napview_log_temp.log"
+    logger = configure_logger(base_path, log_filename=temp_log_filename, force=True)
     logger.info('')
     logger.info('')
     logger.info('Init: #############################################################')
@@ -434,6 +467,24 @@ def main():
     ########################################
     ### INIT MANAGERS
     config_manager = ConfigManager(base_path, load_defaults = True)
+    config = config_manager.load_config()
+    separate_session_log = config.get('separate_session_log', True)
+    if separate_session_log:
+        config_manager.save_config({'log_file_name': temp_log_filename})
+    else:
+        default_log_filename = "napview_log.log"
+        temp_log_path = Path(base_path) / temp_log_filename
+        default_log_path = Path(base_path) / default_log_filename
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                handler.flush()
+        if not temp_log_path.exists():
+            raise FileNotFoundError(f"Temp log file not found at {temp_log_path}")
+        with open(temp_log_path, 'r') as src, open(default_log_path, 'a') as dst:
+            dst.write(src.read())
+        logger = configure_logger(base_path, log_filename=default_log_filename, force=True)
+        temp_log_path.unlink()
+        config_manager.save_config({'log_file_name': default_log_filename})
     
     db_handler = DatabaseHandler(base_path)
     db_handler.setup_database(create_tables=True)

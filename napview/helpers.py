@@ -5,19 +5,39 @@ from pathlib import Path
 import threading 
 import time
 
-def configure_logger(base_path):
+def configure_logger(base_path, log_filename=None, force=False):
     logger = logging.getLogger('napview_logger')
-    if not logger.handlers:  
-        try:
-            logger.setLevel(logging.DEBUG)
-            base_path = Path(base_path) if not isinstance(base_path, Path) else base_path
-            base_path.mkdir(parents=True, exist_ok=True)
-            handler = logging.FileHandler(base_path / 'napview_log.log', mode='a')
+    try:
+        logger.setLevel(logging.DEBUG)
+        base_path = Path(base_path) if not isinstance(base_path, Path) else base_path
+        base_path.mkdir(parents=True, exist_ok=True)
+
+        if log_filename is None:
+            config_path = base_path / "config.json"
+            if config_path.exists():
+                with open(config_path, 'r') as config_file:
+                    config = json.load(config_file)
+                log_filename = config.get('log_file_name')
+
+        if not log_filename:
+            log_filename = 'napview_log.log'
+
+        log_path = base_path / log_filename
+        existing_file_handler = next(
+            (handler for handler in logger.handlers if isinstance(handler, logging.FileHandler)),
+            None
+        )
+        if force or existing_file_handler is None or Path(existing_file_handler.baseFilename) != log_path:
+            for handler in list(logger.handlers):
+                if isinstance(handler, logging.FileHandler):
+                    logger.removeHandler(handler)
+                    handler.close()
+            handler = logging.FileHandler(log_path, mode='a')
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(processName)s - %(message)s')
             handler.setFormatter(formatter)
             logger.addHandler(handler)
-        except Exception as e:
-            print(f"Error configuring logger: {e}")
+    except Exception as e:
+        print(f"Error configuring logger: {e}")
     return logger
 
 
