@@ -3,29 +3,48 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>[napview:control]</title>
+<script>
+  const DESIGN_WIDTH = 1920;
+  const DESIGN_HEIGHT = 1080;
+
+  function updateScale() {
+    const scale = Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
+    document.documentElement.style.setProperty('--scale', scale.toFixed(3));
+  }
+
+  window.addEventListener('resize', updateScale);
+  window.addEventListener('DOMContentLoaded', updateScale);
+</script>
 <style>
   :root {
-    --font-size-small: 10px;
-    --font-size-base: 12px;
-    --font-size-large: 16px;
-    --input-width: 90%;
+    --scale: 1;
+    --base-unit: 16px;
+    --base-font: 16px;
+    --unit: calc(var(--base-unit) * var(--scale));
+    --font-size: calc(var(--base-font) * var(--scale));
+    --font-size-small: calc(12px * var(--scale));
+    --font-size-base: var(--font-size);
+    --font-size-large: calc(20px * var(--scale));
+    --input-width: 92%;
     --button-width: var(--input-width);
-    --column-padding: var(--spacing-medium);
-    --column-border-radius: 8px;
-    --input-padding: var(--spacing-medium);
-    --button-padding: var(--spacing-medium);
-    --status-label-padding: var(--spacing-medium);
+    --column-padding: calc(var(--unit) * 0.9);
+    --column-border-radius: calc(12px * var(--scale));
+    --input-padding: calc(var(--unit) * 0.6);
+    --button-padding: calc(var(--unit) * 0.7);
+    --status-label-padding: calc(var(--unit) * 0.7);
     --label-margin-right: calc(3ch);
-    --spacing-small: 5px;
-    --spacing-medium: 10px;
-    --spacing-large: 20px;
+    --spacing-small: calc(var(--unit) * 0.35);
+    --spacing-medium: calc(var(--unit) * 0.6);
+    --spacing-large: calc(var(--unit) * 1.1);
     --dialog-width: 80%;
     --dialog-max-height: 80%;
     --column-gap: var(--spacing-medium);
+    --page-margin: calc(var(--unit) * 1.2);
     --color-background: #1e1e1e;
     --color-foreground: #ffffff;
     --color-accent: darkcyan;
@@ -35,7 +54,7 @@
     --color-button-disabled: #2a2929;
     --color-status-border: #3e3e3e;
     --color-status-background: #000000;
-    --border-radius: 4px;
+    --border-radius: calc(8px * var(--scale));
   }
   /* Global styles */
   *, *::before, *::after {
@@ -46,7 +65,7 @@
     color: var(--color-foreground);
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     margin: 0;
-    padding: 0;
+    padding: var(--page-margin);
     font-size: var(--font-size-base);
   }
   a {
@@ -69,8 +88,8 @@
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     grid-gap: var(--column-gap);
-    height: calc(100vh - 40px);
-    padding: var(--spacing-medium);
+    height: calc(100vh - (var(--page-margin) * 2));
+    padding: 0;
   }
   /* Columns */
   .column {
@@ -160,7 +179,7 @@
     border: 1px solid var(--color-status-border);
     padding: var(--status-label-padding);
     font-family: 'Courier New', Courier, monospace;
-    margin-top: var(--spacing-medium);
+    margin-top: var(--spacing-large);
     width: var(--input-width);
     margin: var(--spacing-medium) auto 0 auto;
   }
@@ -175,7 +194,7 @@
     display: flex;
     gap: var(--spacing-medium);
     align-items: center;
-    width: var(--input-width); 
+    width: var(--input-width);
     margin: 0 auto;
   }
   .file-input-row .button {

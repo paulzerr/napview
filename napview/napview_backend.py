@@ -89,6 +89,13 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
         self.db_handler = db_handler
         super().__init__(*args, **kwargs)
 
+    def end_headers(self):
+        # Prevent stale GUI pages from being cached by the browser.
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        super().end_headers()
+
     def do_GET(self):
         if self.path == '/':
             self.path = '/templates/gui.html'
