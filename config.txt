@@ -1,0 +1,6 @@
+;!@Install@!UTF-8!
+Title="NAPVIEW Application Extractor"
+BeginPrompt="This will extract the NAPVIEW application files to a folder on your computer.\n\nPlease choose a destination folder to continue."
+InstallPath="NAPVIEW"
+FinishMessage="The NAPVIEW application files have been successfully extracted. You can now open the folder you selected and run NAPVIEW.exe."
+;!@InstallEnd@!
