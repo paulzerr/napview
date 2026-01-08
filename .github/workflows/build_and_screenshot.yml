@@ -117,19 +117,38 @@ jobs:
         run: |
           @"
           import time
+          import json
           from pathlib import Path
           from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-          URL = "http://127.0.0.1:8145"
+          DATA_DIR = Path("NAPVIEW_install") / "data"
+          CONFIG_PATH = DATA_DIR / "config.json"
           VIEWPORTS = [(1280, 720), (1920, 1080), (375, 812)]
           OUTPUT_DIR = Path("screenshots")
           OUTPUT_DIR.mkdir(exist_ok=True)
 
+          def wait_for_port():
+              deadline = time.time() + 90
+              while time.time() < deadline:
+                  if CONFIG_PATH.exists():
+                      try:
+                          with CONFIG_PATH.open("r") as f:
+                              cfg = json.load(f)
+                          port = cfg.get("gui_server_port")
+                          if isinstance(port, int):
+                              return port
+                      except Exception:
+                          pass
+                  time.sleep(2)
+              raise RuntimeError("gui_server_port not found in config.json")
+
           def wait_for_app(page):
               deadline = time.time() + 60
+              port = wait_for_port()
+              url = f"http://127.0.0.1:{port}"
               while time.time() < deadline:
                   try:
-                      page.goto(URL, wait_until="domcontentloaded", timeout=5000)
+                      page.goto(url, wait_until="domcontentloaded", timeout=5000)
                       page.wait_for_selector("#statusLabel", timeout=5000)
                       return
                   except PlaywrightTimeoutError:

@@ -12,6 +12,7 @@ class Visualizer:
     
     STAGING_DESIRED_FIELDS = ['w', 'n1', 'n2', 'n3', 'rem']
     YASA_DESIRED_FIELDS = ['alpha_power', 'beta_power', 'theta_power', 'delta_power', 'gamma_power']
+    BANDPOWER_MODE = 'bandpower'
 
     def __init__(self, base_path, mode):
         self.base_path = base_path
@@ -68,7 +69,8 @@ class Visualizer:
         @self.app.route('/data1')
         def data1():
             try:
-                data = self.db_handler.get_all_analysis_results(self.STAGING_DESIRED_FIELDS)
+                staging_mode = self.config.get('sleep_staging_model', 'U-Sleep')
+                data = self.db_handler.get_all_analysis_results(self.STAGING_DESIRED_FIELDS, analyzer_mode=staging_mode)
                 return jsonify(data)
             except Exception as e:
                 self.logger.error(f"Error in /data1 endpoint: {e}", exc_info=True)
@@ -77,7 +79,7 @@ class Visualizer:
         @self.app.route('/data2')
         def data2():
             try:
-                data = self.db_handler.get_all_analysis_results(self.YASA_DESIRED_FIELDS)
+                data = self.db_handler.get_all_analysis_results(self.YASA_DESIRED_FIELDS, analyzer_mode=self.BANDPOWER_MODE)
                 return jsonify(data)
             except Exception as e:
                 self.logger.error(f"Error in /data2 endpoint: {e}", exc_info=True)

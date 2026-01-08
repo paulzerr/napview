@@ -202,14 +202,17 @@ class DatabaseHandler:
         )
 
 
-    def get_all_analysis_results(self, desired_fields: list):
+    def get_all_analysis_results(self, desired_fields: list, analyzer_mode=None):
         results_by_field = {field: [] for field in desired_fields}
 
         try:
             query = AnalysisResult.select(
                 AnalysisResult.timestamp,
                 AnalysisResult.results_data
-            ).order_by(AnalysisResult.timestamp) 
+            )
+            if analyzer_mode:
+                query = query.where(AnalysisResult.analyzer_mode == analyzer_mode)
+            query = query.order_by(AnalysisResult.timestamp)
 
             for record in query:
                 timestamp = record.timestamp
@@ -224,7 +227,11 @@ class DatabaseHandler:
                         results_by_field[field].append({'x': timestamp, 'y': value})
             return results_by_field
         except Exception as e:
-            self.logger.error(f"Database Handler: Error retrieving/processing analysis results for fields {desired_fields}: {e}", exc_info=True)
+            self.logger.error(
+                f"Database Handler: Error retrieving/processing analysis results for fields {desired_fields} "
+                f"(mode={analyzer_mode}): {e}",
+                exc_info=True
+            )
             return {field: [] for field in desired_fields}
 
 

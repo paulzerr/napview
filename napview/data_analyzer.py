@@ -2,11 +2,13 @@ import os
 import time
 import json
 import numpy as np
+import scipy.signal as sp_sig
 
 import NIDRA
 
 from .database_handler import DatabaseHandler, AnalysisResult
 from .helpers import configure_logger, ConfigManager
+from .yasa_staging_minimal import bandpower_from_psd
 
 class Analyzer:
 
@@ -188,3 +190,164 @@ class Analyzer:
         self.logger.info(f"Analyzer ({self.mode}): Shutting down...")
         if self.db_handler:
             self.db_handler.close() 
+
+
+class BandpowerAnalyzer:
+    def __init__(self, base_path, mode):
+        self.logger = configure_logger(base_path)
+        self.logger.info(f"BandpowerAnalyzer started in mode: << {mode} >>...")
+
+        self.mode = mode
+        self.base_path = base_path
+
+        self.config_manager = ConfigManager(base_path)
+        self.config = self.config_manager.load_config(instance=self)
+
+        self.epoch_length = self.config.get('epoch_length', 30)
+
+        self.db_handler = DatabaseHandler(self.base_path)
+        self.db_handler.setup_database()
+
+        self.eeginfo = self.db_handler.retrieve_info()
+        self.eeginfo.channel_names = json.loads(self.eeginfo.channel_names)
+
+    def _calculate_retrieval_start_index(self, start_idx, end_idx, single_epoch):
+        if single_epoch:
+            return int(start_idx)
+
+        context_duration_seconds = 1200
+        start_idx_window = max(0, end_idx - context_duration_seconds * self.eeginfo.sample_rate)
+        samples_per_epoch = self.epoch_length * self.eeginfo.sample_rate
+        aligned_start_idx = (start_idx_window // samples_per_epoch) * samples_per_epoch
+        return int(aligned_start_idx)
+
+    def get_data(self, start_idx, end_idx, single_epoch=False):
+        total_samples = self.db_handler.get_total_n_samples()
+        if total_samples is None:
+            self.logger.warning(f"BandpowerAnalyzer ({self.mode}): no samples available.")
+            return None
+        start_idx_max = self._calculate_retrieval_start_index(start_idx, end_idx, single_epoch)
+        epoch_data = self.db_handler.retrieve_data(start_idx_max, end_idx)
+        return epoch_data.astype(np.float64)
+
+    def volts_to_microvolts(self, data):
+        if data is None:
+            return None
+        if data.ndim == 1:
+            median = np.median(data)
+            q25 = np.quantile(np.abs(data - median), 0.25)
+            m_value = q25
+        else:
+            medians = np.median(data, axis=1, keepdims=True)
+            q25 = np.quantile(np.abs(data - medians), 0.25, axis=1)
+            m_value = np.median(q25)
+        return data * 1e6 if m_value < 1e-2 else data
+
+    def compute_bandpower(self, start_idx, end_idx, timestamp):
+        analysis_result = {'timestamp': timestamp}
+        try:
+            epoch_data_uv = self.volts_to_microvolts(self.get_data(start_idx, end_idx, single_epoch=True))
+            if epoch_data_uv is None:
+                self.logger.warning(f"BandpowerAnalyzer ({self.mode}): No data retrieved for indices {start_idx} to {end_idx}.")
+                return None
+
+            samples_per_epoch = self.epoch_length * self.eeginfo.sample_rate
+            if epoch_data_uv.shape[-1] < samples_per_epoch:
+                self.logger.warning(
+                    f"BandpowerAnalyzer ({self.mode}): Not enough samples yet. Waiting for more data."
+                )
+                time.sleep(1)
+                return None
+
+            win = min(int(5 * self.eeginfo.sample_rate), epoch_data_uv.shape[-1])
+            freqs, psd = sp_sig.welch(epoch_data_uv, self.eeginfo.sample_rate, nperseg=win, axis=-1)
+            bands = [
+                (0.5, 4, "delta"),
+                (4, 8, "theta"),
+                (8, 12, "alpha"),
+                (16, 30, "beta"),
+                (30, 40, "gamma"),
+            ]
+            bp = bandpower_from_psd(psd, freqs, bands=bands, relative=True)
+            analysis_result.update({
+                'delta_power': float(bp['delta'].mean()),
+                'theta_power': float(bp['theta'].mean()),
+                'alpha_power': float(bp['alpha'].mean()),
+                'beta_power': float(bp['beta'].mean()),
+                'gamma_power': float(bp['gamma'].mean()),
+            })
+        except Exception as e:
+            self.logger.error(f'BandpowerAnalyzer.compute_bandpower: Failed during bandpower process: {e}', exc_info=True)
+            return None
+
+        self.db_handler.add_analysis_result(analysis_result, analyzer_mode=self.mode)
+        return analysis_result
+
+    def count_already_analyzed_epochs(self):
+        try:
+            n_analyzed = AnalysisResult.select().where(AnalysisResult.analyzer_mode == self.mode).count()
+            return n_analyzed
+        except Exception as e:
+            self.logger.error(
+                f"BandpowerAnalyzer ({self.mode}): Could not get number of analyzed epochs. Error: {e}",
+                exc_info=True
+            )
+            return 0
+
+    def find_next_epoch_indices(self, number_already_analyzed_epochs):
+        samples_per_epoch = self.eeginfo.sample_rate * self.epoch_length
+        total_n_samples = self.db_handler.get_total_n_samples()
+
+        if total_n_samples is None:
+            return None, None, None
+
+        potential_epochs = total_n_samples // samples_per_epoch
+
+        if potential_epochs > number_already_analyzed_epochs:
+            start_sample_index = number_already_analyzed_epochs * samples_per_epoch
+            end_sample_index = start_sample_index + samples_per_epoch - 1
+            timestamp = self.db_handler.get_sample_timestamp(start_sample_index)
+            return start_sample_index, end_sample_index, timestamp
+        return None, None, None
+
+    def run(self):
+        last_epoch_timestamp = 0
+
+        current_epoch_index = self.count_already_analyzed_epochs()
+        self.logger.info(f"BandpowerAnalyzer ({self.mode}): Beginning analysis from epoch index {current_epoch_index}.")
+
+        if current_epoch_index > 0:
+            try:
+                last_result = AnalysisResult.select().where(AnalysisResult.analyzer_mode == self.mode).order_by(
+                    AnalysisResult.timestamp.desc()
+                ).get()
+                last_epoch_timestamp = last_result.timestamp
+                self.logger.info(
+                    f"BandpowerAnalyzer ({self.mode}): Last analyzed epoch timestamp is {last_epoch_timestamp}."
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"BandpowerAnalyzer ({self.mode}): Could not get last analyzed epoch timestamp. Error: {e}",
+                    exc_info=True
+                )
+
+        while True:
+            try:
+                start_idx, end_idx, timestamp = self.find_next_epoch_indices(current_epoch_index)
+                if start_idx is not None and (last_epoch_timestamp == 0 or timestamp >= last_epoch_timestamp + self.epoch_length):
+                    self.logger.info(
+                        f"BandpowerAnalyzer ({self.mode}): Running bandpower for epoch {current_epoch_index} at timestamp {timestamp}..."
+                    )
+                    self.compute_bandpower(start_idx, end_idx, timestamp)
+                    last_epoch_timestamp = timestamp
+                    current_epoch_index += 1
+                else:
+                    time.sleep(.1)
+            except Exception as e:
+                self.logger.error(f"BandpowerAnalyzer ({self.mode}): An error occurred in the run loop: {e}", exc_info=True)
+                time.sleep(5)
+
+    def shutdown(self):
+        self.logger.info(f"BandpowerAnalyzer ({self.mode}): Shutting down...")
+        if self.db_handler:
+            self.db_handler.close()
