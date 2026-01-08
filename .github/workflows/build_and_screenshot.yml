@@ -104,6 +104,7 @@ jobs:
       - name: Install via installer
         run: |
           Start-Process -FilePath ".\NAPVIEW_installer.exe" -ArgumentList "-y" -Wait
+          & "C:\Program Files\7-Zip\7z.exe" x NAPVIEW_archive.7z -oNAPVIEW_install -y
 
       - name: Launch NAPVIEW
         run: |
