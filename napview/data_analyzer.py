@@ -84,10 +84,6 @@ class Analyzer:
             if all_data_uv is None:
                 self.logger.warning(f"Analyzer ({self.mode}): No data retrieved for indices {start_idx} to {end_idx}.")
                 return None
-            
-            print("######################################") 
-            print(all_data_uv)
-            print("######################################")
 
             samples_per_epoch = self.epoch_length * self.eeginfo.sample_rate
             if all_data_uv.shape[-1] < (6 * samples_per_epoch):

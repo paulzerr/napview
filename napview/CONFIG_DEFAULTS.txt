@@ -11,5 +11,16 @@
     "openbci_port": "COM3",
     "lsl_stream_name": "napview_EEG_stream",
     "record_name": "night_1",
-    "separate_session_log": true
+    "separate_session_log": true,
+    "chart_palette": "okabe-ito",
+    "chart_colors": {
+        "chart1": ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7"],
+        "chart2": ["#0072B2", "#E69F00", "#009E73", "#D55E00"]
+    },
+    "chart_theme": {
+        "background": "#1e1e1e",
+        "grid": "#cfcfcf",
+        "axisText": "#ffffff",
+        "legendText": "#ffffff"
+    }
 }

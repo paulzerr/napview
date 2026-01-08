@@ -1,6 +1,12 @@
 let chartsState = {};
 
-export function createChart(containerId, data, colors, labels) {
+export function createChart(containerId, data, colors, labels, theme) {
+    const resolvedTheme = theme || {
+        background: "#1e1e1e",
+        grid: "#cfcfcf",
+        axisText: "#ffffff",
+        legendText: "#ffffff"
+    };
     const container = document.getElementById(containerId);
     const placeholder = container ? container.querySelector(".chart-placeholder") : null;
     if (placeholder) {
@@ -27,6 +33,11 @@ export function createChart(containerId, data, colors, labels) {
         .append("g")
         .attr("transform", `translate(${margin.left},${margin.top})`);
 
+    svg.append("rect")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("fill", resolvedTheme.background);
+
     svg.append("defs")
         .append("clipPath")
         .attr("id", "clip")
@@ -43,7 +54,7 @@ svg.append("text")
     .attr("dy", "1em")
     .style("text-anchor", "middle")
     .style("font-size", "24px")
-    .style("fill", "#ffffff") // White text
+    .style("fill", resolvedTheme.axisText)
     .text(labels[0]);
 
 svg.append("text")
@@ -51,7 +62,7 @@ svg.append("text")
     .attr("y", height + (margin.bottom * 0.8))
     .style("text-anchor", "middle")
     .style("font-size", "24px")
-    .style("fill", "#ffffff") // White text
+    .style("fill", resolvedTheme.axisText)
     .text("Time");
 
 
@@ -109,11 +120,20 @@ svg.append("text")
 
 
 //////////////////////////////
-    gX.selectAll("text")
-        .style("font-size", "17px");
-    
-    gY.selectAll("text")
-        .style("font-size", "17px");
+    function applyAxisStyles() {
+        gX.selectAll("text")
+            .style("font-size", "17px")
+            .style("fill", resolvedTheme.axisText);
+        
+        gY.selectAll("text")
+            .style("font-size", "17px")
+            .style("fill", resolvedTheme.axisText);
+
+        gX.selectAll("line").style("stroke", resolvedTheme.grid);
+        gY.selectAll("line").style("stroke", resolvedTheme.grid);
+    }
+
+    applyAxisStyles();
 //////////////////////////////
 
 
@@ -146,7 +166,7 @@ svg.append("text")
         .style("pointer-events", "all")
         .call(zoom);
 
-    addLegend(svg, width, height, labels, colors);
+    addLegend(svg, width, height, labels, colors, resolvedTheme);
 
     function render(data, newXScale) {
         const flatData = data.flat();
@@ -159,6 +179,7 @@ svg.append("text")
         const xTicks = newXScale.ticks(numberOfXTicks);
         gX.call(xAxis.scale(newXScale).tickValues(xTicks));
         gY.call(yAxis.scale(yScale));
+        applyAxisStyles();
 
         const line = d3.line()
             .x(d => newXScale(d.x))
@@ -266,7 +287,7 @@ svg.append("text")
 // }
 
 
-export function addLegend(svg, width, height, labels, colors) {
+export function addLegend(svg, width, height, labels, colors, theme) {
     const legendWidth = width * 0.12;
     const itemSpacing = width * 0.015;
     const itemWidth = width * 0.017;
@@ -286,7 +307,7 @@ export function addLegend(svg, width, height, labels, colors) {
     legend.append("rect")
         .attr("width", legendWidth)
         .attr("height", legendHeight)
-        .attr("fill", "#1e1e1e") // Ensure the background is dark
+        .attr("fill", theme.background)
         .attr("fill-opacity", 0.8);
 
     const legendItems = legend.selectAll(".legend-item")
@@ -310,7 +331,7 @@ export function addLegend(svg, width, height, labels, colors) {
         .attr("y", itemHeight / 2)
         .attr("font-size", `${labelFontSize}px`)
         .attr("alignment-baseline", "middle")
-        .attr("fill", "#ffffff") // Ensure text is visible
+        .attr("fill", theme.legendText)
         .text(d => d);
 }
 

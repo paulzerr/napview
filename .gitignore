@@ -1,10 +1,14 @@
 ignore_this_folder/
-data/
+data/nidra_temp/
+data/output/
+data/config.json
+data/*.old
+data/temp
 *.log
 *.bak
 __pycache__/
 *.tmp
-*.edf
+
 *.pyc
 *.pyo
 *.pyd

@@ -43,6 +43,25 @@ class Visualizer:
                 self.logger.error(f"Error rendering template 'index.html': {e}", exc_info=True)
                 return "An error occurred", 500
 
+        @self.app.route('/load_config')
+        def load_config():
+            try:
+                self.config = self.config_manager.load_config(instance=self)
+                return jsonify(self.config)
+            except Exception as e:
+                self.logger.error(f"Error in /load_config endpoint: {e}", exc_info=True)
+                return jsonify({'error': 'An error occurred'}), 500
+
+        @self.app.route('/update_config', methods=['POST'])
+        def update_config():
+            try:
+                config_updates = request.get_json()
+                self.config_manager.save_config(config_updates)
+                return jsonify({'status': 'Configuration updated'})
+            except Exception as e:
+                self.logger.error(f"Error in /update_config endpoint: {e}", exc_info=True)
+                return jsonify({'error': 'An error occurred'}), 500
+
         @self.app.route('/data1')
         def data1():
             try:

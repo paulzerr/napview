@@ -66,7 +66,8 @@ class ConfigManager:
     def load_config_defaults(self, base_path):
         config_json_path = os.path.join(base_path, 'config.json')
         if os.path.exists(config_json_path):
-            os.remove(config_json_path)
+            self.load_config()
+            return
 
         config_defaults_path = os.path.join(os.path.dirname(__file__), 'CONFIG_DEFAULTS.txt')
         try:

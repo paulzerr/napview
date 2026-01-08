@@ -40,16 +40,21 @@
     </div> -->
 
     <div id="chartWrapper"></div>
-    <div class="chart-container">
-        <div class="chart-block" id="d3Plot1">
-            <div class="chart-placeholder">Waiting for data...</div>
+    <div class="chart-page">
+        <div class="chart-toolbar">
+            <button id="colorOptionsButton">Colors</button>
         </div>
-        <div class="chart-block" id="d3Plot2">
-            <div class="chart-placeholder">Waiting for data...</div>
-        </div>
-        <!-- <div class="chart-block" id="d3Plot3"></div>
-        <div class="chart-block" id="d3Plot4"></div> -->
+        <div class="chart-container">
+            <div class="chart-block" id="d3Plot1">
+                <div class="chart-placeholder">Waiting for data...</div>
+            </div>
+            <div class="chart-block" id="d3Plot2">
+                <div class="chart-placeholder">Waiting for data...</div>
+            </div>
+            <!-- <div class="chart-block" id="d3Plot3"></div>
+            <div class="chart-block" id="d3Plot4"></div> -->
 
+        </div>
     </div>
 <!-- 
     <div id="modal1" class="channel-modal">
@@ -80,6 +85,52 @@
             <button id="closeModal3">Close</button>
         </div>
     </div> -->
+
+    <div id="colorDialog" class="dialog-overlay">
+        <div class="modal-content color-dialog">
+            <h2>Colors</h2>
+            <div class="dialog-section">
+                <label for="paletteSelect">Palette</label>
+                <select id="paletteSelect"></select>
+            </div>
+            <div class="dialog-section">
+                <div class="dialog-subtitle">Plot</div>
+                <div class="color-grid">
+                    <div class="color-row">
+                        <span>Background</span>
+                        <input id="plotBackground" type="color">
+                    </div>
+                    <div class="color-row">
+                        <span>Grid</span>
+                        <input id="plotGrid" type="color">
+                    </div>
+                    <div class="color-row">
+                        <span>Axis text</span>
+                        <input id="plotAxisText" type="color">
+                    </div>
+                    <div class="color-row">
+                        <span>Legend text</span>
+                        <input id="plotLegendText" type="color">
+                    </div>
+                </div>
+            </div>
+            <div class="dialog-section dialog-columns">
+                <div>
+                    <div class="dialog-subtitle">Sleep staging</div>
+                    <div id="chart1ColorList" class="color-grid"></div>
+                </div>
+                <div>
+                    <div class="dialog-subtitle">Band power</div>
+                    <div id="chart2ColorList" class="color-grid"></div>
+                </div>
+            </div>
+            <div class="dialog-actions">
+                <button id="resetColors">Reset colors</button>
+                <button id="saveColors">Save</button>
+                <button id="closeColors">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script type="module" src="static/execute_plot.js"></script>
