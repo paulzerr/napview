@@ -9,7 +9,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LSL_LIB_BY_PLATFORM = {
     "linux": "libs/liblsl.so",
     "darwin": "libs/liblsl.dylib",
-    "win32": "libs/liblsl.dll",
+    "win32": "libs/lsl.dll",
 }
 lib_name = LSL_LIB_BY_PLATFORM.get(sys.platform)
 if lib_name:

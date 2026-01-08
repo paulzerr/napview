@@ -22,5 +22,6 @@
         "grid": "#cfcfcf",
         "axisText": "#ffffff",
         "legendText": "#ffffff"
-    }
+    },
+    "chart_custom_palettes": []
 }
