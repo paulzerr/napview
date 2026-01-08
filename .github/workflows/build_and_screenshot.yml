@@ -93,11 +93,11 @@ jobs:
           InstallPath="$pwd\NAPVIEW_install"
           Progress="yes"
           FinishMessage="Do you want to launch NAPVIEW now?"
-          RunProgram="NAPVIEW\NAPVIEW.exe"
+          RunProgram="NAPVIEW.exe"
           ;!@InstallEnd@!
           "@ | Set-Content -Path sfx_config.txt
           Set-Location -Path dist
-          & "C:\Program Files\7-Zip\7z.exe" a ..\NAPVIEW_archive.7z NAPVIEW
+          & "C:\Program Files\7-Zip\7z.exe" a ..\NAPVIEW_archive.7z .\NAPVIEW\*
           Set-Location -Path ..
           cmd.exe --% /c copy /b "C:\Program Files\7-Zip\7z.sfx" + sfx_config.txt + NAPVIEW_archive.7z NAPVIEW_installer.exe
 
@@ -107,9 +107,9 @@ jobs:
 
       - name: Launch NAPVIEW
         run: |
-          $exePath = "$pwd\\NAPVIEW_install\\NAPVIEW\\NAPVIEW.exe"
+          $exePath = "$pwd\\NAPVIEW_install\\NAPVIEW.exe"
           if (-not (Test-Path $exePath)) { throw "NAPVIEW.exe not found at $exePath"; }
-          Start-Process -FilePath $exePath -WorkingDirectory "$pwd\\NAPVIEW_install\\NAPVIEW"
+          Start-Process -FilePath $exePath -WorkingDirectory "$pwd\\NAPVIEW_install"
           Start-Sleep -Seconds 10
 
       - name: Capture screenshots
