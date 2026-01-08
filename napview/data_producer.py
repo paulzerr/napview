@@ -38,11 +38,13 @@ class DataProducer:
         except Exception as e:
             self.logger.error(f"Producer: Failed to read the EEG file at {self.sim_input_file_path}: {e}", exc_info=True)
 
-    def connect_brainvision_rda(self, max_retries=10, retry_delay=1):
+    def connect_brainvision_rda(self, max_retries=None, retry_delay=1):
         self.config = self.config_manager.load_config(instance=self)
         self.amp_ip = self.config.get('amp_ip', '127.0.0.1')
         self.port = self.config.get('amp_port', 51244)
-        for attempt in range(1, max_retries + 1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 self.logger.info(f"Producer: Attempting to connect to {self.amp_ip}:{self.port}")
                 self.con = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -53,14 +55,21 @@ class DataProducer:
                 return
             except Exception as e:
                 self.logger.error(f"Producer: Connection attempt {attempt} failed: {e}", exc_info=True)
-                if attempt < max_retries:
-                    self.logger.info(f"Producer: Retrying in {retry_delay} second(s)...")
-                    time.sleep(retry_delay)
-                else:
-                    self.logger.error(f"Producer: Max EEG amp connection retries reached. Unable to connect. {e}", exc_info=True)
+                if hasattr(self, 'con'):
+                    self.con.close()
+                if max_retries is not None and attempt >= max_retries:
+                    self.logger.error(
+                        f"Producer: Max EEG amp connection retries reached. Unable to connect. {e}",
+                        exc_info=True,
+                    )
+                    raise
+                self.logger.info(f"Producer: Retrying in {retry_delay} second(s)...")
+                time.sleep(retry_delay)
 
-    def get_amp_info(self, max_retries=10, retry_delay=1):
-        for attempt in range(1, max_retries + 1):
+    def get_amp_info(self, max_retries=None, retry_delay=1):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 self.logger.info(f"Producer: Attempting to retrieve EEG info from amp.")
                 raw_data_chunk, message_type = self.unpack_raw_message()
@@ -73,11 +82,14 @@ class DataProducer:
                     return n_channels, self.sample_rate, resolutions, self.channel_names
             except Exception as e:
                 self.logger.error(f"Producer: Attempt {attempt} failed to get amp info: {e}", exc_info=True)
-                if attempt < max_retries:
-                    self.logger.info(f"Producer: Retrying in {retry_delay} second(s)...")
-                    time.sleep(retry_delay)
-                else:
-                    self.logger.error(f"Producer: Max info retrieval retries reached. Unable to get EEG amp info. {e}", exc_info=True)
+                if max_retries is not None and attempt >= max_retries:
+                    self.logger.error(
+                        f"Producer: Max info retrieval retries reached. Unable to get EEG amp info. {e}",
+                        exc_info=True,
+                    )
+                    raise
+                self.logger.info(f"Producer: Retrying in {retry_delay} second(s)...")
+                time.sleep(retry_delay)
 
     def receive_data_chunk(self, requestedSize, max_wait=5.0):
         """
@@ -351,7 +363,7 @@ class DataProducer:
                 del self.stream_outlet
                 self.logger.info("Producer: LSL outlet deleted...")
             self.logger.info("Producer: LSL stream closed via shutdown")
-            if self.mode == "brainvision" and hasattr(self, 'con'):
+            if self.mode == "Brainvision" and hasattr(self, 'con'):
                 self.con.close()
                 self.logger.info("Producer: BrainVision RDA connection closed")
             if self.mode == "OpenBCI" and hasattr(self, 'board'):

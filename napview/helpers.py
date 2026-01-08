@@ -7,6 +7,8 @@ import threading
 import time
 
 def get_resource_root():
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS).resolve() / "napview"
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent / "napview"
     return Path(__file__).resolve().parent

@@ -15,6 +15,8 @@ from email.parser import BytesParser
 from email.policy import default
 import mne
 
+import sys
+
 from .data_producer import DataProducer
 from .data_recorder import DataRecorder
 from .data_analyzer import Analyzer, BandpowerAnalyzer
@@ -408,7 +410,10 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
 
 def main():
 
-    app_root = get_resource_root().parent
+    if getattr(sys, "frozen", False):
+        app_root = Path(sys.executable).resolve().parent
+    else:
+        app_root = Path(__file__).resolve().parent.parent
 
     #########################################
     ###  ESTABLISH BASE PATH

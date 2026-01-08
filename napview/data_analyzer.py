@@ -88,13 +88,16 @@ class Analyzer:
                 return None
 
             samples_per_epoch = self.epoch_length * self.eeginfo.sample_rate
-            if all_data_uv.shape[-1] < (6 * samples_per_epoch):
+            total_samples = self.db_handler.get_total_n_samples() or 0
+            min_required_samples = samples_per_epoch if total_samples >= (6 * samples_per_epoch) else (6 * samples_per_epoch)
+            if all_data_uv.shape[-1] < min_required_samples:
                 self.logger.warning(
                     f"Analyzer ({self.mode}): Not enough samples yet. Waiting for more data."
                 )
                 time.sleep(1)
                 return None
             
+            score_start = time.perf_counter()
             scorer = NIDRA.scorer(
                 type='psg',
                 input=all_data_uv,
@@ -106,6 +109,12 @@ class Analyzer:
                 plot=False,
             )
             hypno, probs = scorer.score()
+            score_elapsed = time.perf_counter() - score_start
+            window_seconds = all_data_uv.shape[-1] / self.eeginfo.sample_rate
+            self.logger.info(
+                f"Analyzer ({self.mode}): Sleep staging took {score_elapsed:.3f} s "
+                f"on {window_seconds:.1f} s of data."
+            )
             results_probabilities = probs[0, :5]
             
         except Exception as e:
