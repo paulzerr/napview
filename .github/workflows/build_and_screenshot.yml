@@ -43,6 +43,12 @@ jobs:
           .\venv\Scripts\activate
           python -m pip install --upgrade pip "setuptools<70.0.0" wheel
           pip install pyinstaller toml
+
+      - name: Install project dependencies
+        run: |
+          .\venv\Scripts\activate
+          python -m pip install --upgrade pip "setuptools<70.0.0"
+          pip install pyinstaller toml
           pip install .
 
       - name: Install Playwright
@@ -84,6 +90,7 @@ jobs:
           ;!@Install@!UTF-8!
           Title="NAPVIEW Installer"
           BeginPrompt="This will install NAPVIEW. Do you want to continue?"
+          InstallPath="NAPVIEW_install"
           Progress="yes"
           FinishMessage="Do you want to launch NAPVIEW now?"
           RunProgram="NAPVIEW\NAPVIEW.exe"
@@ -96,10 +103,11 @@ jobs:
 
       - name: Install via installer
         run: |
-          .\NAPVIEW_installer.exe -y -oNAPVIEW_install
+          .\NAPVIEW_installer.exe -y
 
       - name: Launch NAPVIEW
         run: |
+          if (-not (Test-Path ".\\NAPVIEW_install\\NAPVIEW\\NAPVIEW.exe")) { Get-ChildItem -Recurse -Depth 3 ".\\NAPVIEW_install"; throw "NAPVIEW.exe not found under .\\NAPVIEW_install\\NAPVIEW"; }
           Start-Process -FilePath ".\NAPVIEW_install\NAPVIEW\NAPVIEW.exe" -WorkingDirectory ".\NAPVIEW_install\NAPVIEW"
           Start-Sleep -Seconds 10
 

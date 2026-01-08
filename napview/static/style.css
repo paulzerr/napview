@@ -51,6 +51,18 @@ body {
     display: flex;
     justify-content: flex-end;
     gap: calc(var(--unit) * 0.6);
+    align-items: center;
+}
+
+.zoom-control {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--unit) * 0.4);
+    font-weight: 600;
+}
+
+.zoom-control input[type="range"] {
+    width: calc(var(--unit) * 10);
 }
 
 .chart-container {

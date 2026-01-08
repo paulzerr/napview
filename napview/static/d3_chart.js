@@ -1,6 +1,6 @@
 let chartsState = {};
 
-export function createChart(containerId, data, colors, labels, theme) {
+export function createChart(containerId, data, colors, labels, theme, onZoomChange) {
     const resolvedTheme = theme || {
         background: "#1e1e1e",
         grid: "#cfcfcf",
@@ -159,7 +159,7 @@ svg.append("text")
         .translateExtent([[0, 0], [width, height]])
         .on("zoom", zoomed);
 
-    svg.append("rect")
+    const zoomTarget = svg.append("rect")
         .attr("width", width)
         .attr("height", height)
         .style("fill", "none")
@@ -216,6 +216,9 @@ svg.append("text")
     function zoomed(event) {
         const transform = event.transform;
         chartsState[containerId].currentZoomState = transform;
+        if (typeof onZoomChange === 'function') {
+            onZoomChange(transform.k);
+        }
 
         const data = chartsState[containerId].data;
         let newXScale = transform.rescaleX(xScale);
@@ -237,7 +240,7 @@ svg.append("text")
         });
     }
 
-    return { svg, data, xScale, yScale, xAxis, yAxis, gX, gY, containerId, update: updateChart, zoomed };
+    return { svg, data, xScale, yScale, xAxis, yAxis, gX, gY, containerId, update: updateChart, zoomed, zoomBehavior: zoom, zoomTarget, width, height };
 }
 
 

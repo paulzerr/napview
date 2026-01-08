@@ -108,7 +108,14 @@ class DataPlotter {
             }
 
             if (!this.chart) {
-                this.chart = createChart(this.chartId, this.dataSets, this.config.colors, this.config.labels, this.config.theme);
+                this.chart = createChart(
+                    this.chartId,
+                    this.dataSets,
+                    this.config.colors,
+                    this.config.labels,
+                    this.config.theme,
+                    this.config.onZoomChange
+                );
             } else {
                 this.chart.update(this.dataSets);
             }
@@ -134,7 +141,8 @@ const chart1Config = {
     fields: ['n1', 'n2', 'n3', 'rem', 'w'],
     labels: ["probability", "time", "N1", "N2", "N3", "REM", "W"],
     colors: paletteSlice(DEFAULT_PALETTE, 5),
-    theme: { ...DEFAULT_THEME }
+    theme: { ...DEFAULT_THEME },
+    onZoomChange: null
 };
 
 const chart2Config = {
@@ -463,6 +471,24 @@ async function initCharts() {
     chart2Config.colors = config.colors.chart2;
     chart1Config.theme = { ...config.theme };
     chart2Config.theme = { ...config.theme };
+    const zoomSlider = document.getElementById('zoomSlider');
+    if (zoomSlider) {
+        chart1Config.onZoomChange = (zoomLevel) => {
+            const currentMax = parseFloat(zoomSlider.max);
+            if (zoomLevel > currentMax) {
+                zoomSlider.max = zoomLevel.toFixed(1);
+            }
+            zoomSlider.value = zoomLevel.toFixed(2);
+        };
+        zoomSlider.addEventListener('input', () => {
+            const zoomLevel = parseFloat(zoomSlider.value);
+            if (!chart1Plotter.chart || !chart1Plotter.chart.zoomBehavior) {
+                return;
+            }
+            const center = [chart1Plotter.chart.width, chart1Plotter.chart.height / 2];
+            chart1Plotter.chart.zoomBehavior.scaleTo(chart1Plotter.chart.zoomTarget, zoomLevel, center);
+        });
+    }
     setupColorDialog(config.palette, config.colors, config.theme, config.customPalettes);
     chart1Plotter.startPlotting();
     chart2Plotter.startPlotting();
