@@ -1,9 +1,15 @@
 import os
 import logging
 import json 
+import sys
 from pathlib import Path
 import threading 
 import time
+
+def get_resource_root():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "napview"
+    return Path(__file__).resolve().parent
 
 def configure_logger(base_path, log_filename=None, force=False):
     logger = logging.getLogger('napview_logger')
@@ -69,7 +75,7 @@ class ConfigManager:
             self.load_config()
             return
 
-        config_defaults_path = os.path.join(os.path.dirname(__file__), 'CONFIG_DEFAULTS.txt')
+        config_defaults_path = str(get_resource_root() / "CONFIG_DEFAULTS.txt")
         try:
             with open(config_defaults_path, 'r') as file:
                 config_defaults = json.load(file)

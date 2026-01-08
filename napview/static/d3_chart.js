@@ -216,9 +216,6 @@ svg.append("text")
     function zoomed(event) {
         const transform = event.transform;
         chartsState[containerId].currentZoomState = transform;
-        if (typeof onZoomChange === 'function') {
-            onZoomChange(transform.k);
-        }
 
         const data = chartsState[containerId].data;
         let newXScale = transform.rescaleX(xScale);
@@ -229,6 +226,11 @@ svg.append("text")
         newXScale.domain([newDomainStart + domainShift, latestDataPoint]);
 
         render(data, newXScale);
+
+        if (typeof onZoomChange === 'function') {
+            const domain = newXScale.domain();
+            onZoomChange(domain[1] - domain[0]);
+        }
 
         // call the zoomed function for all charts
         Object.keys(chartsState).forEach(id => {

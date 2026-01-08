@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 import webbrowser
 import socket
+import sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from email.parser import BytesParser
 from email.policy import default
@@ -403,10 +404,15 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
 
 def main():
 
+    if getattr(sys, "frozen", False):
+        app_root = Path(sys.executable).resolve().parent
+    else:
+        app_root = Path(__file__).resolve().parent.parent
+
     #########################################
     ###  ESTABLISH BASE PATH
     try:
-        base_path = Path(__file__).resolve().parent.parent / "data"
+        base_path = app_root / "data"
         base_path.mkdir(parents=True, exist_ok=True)
     except Exception as e:
         try:
@@ -454,7 +460,7 @@ def main():
 
     # copy default eeg file to data folder
     eeg_file_name = 'eeg.edf'
-    src_eeg_file_path = Path(__file__).resolve().parent / eeg_file_name
+    src_eeg_file_path = app_root / "napview" / eeg_file_name
     dest_eeg_file_path = base_path / eeg_file_name
     if not dest_eeg_file_path.exists():
         try:
@@ -517,7 +523,7 @@ def main():
         logger.info(f"      {key}: {value}")
 
     # start http request handler
-    root_dir = Path(__file__).resolve().parent
+    root_dir = app_root / "napview"
     gui_server_handler = lambda *args, **kwargs: NapviewRequestHandler(
         *args,
         directory=root_dir,

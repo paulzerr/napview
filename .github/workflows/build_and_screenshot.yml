@@ -90,7 +90,7 @@ jobs:
           ;!@Install@!UTF-8!
           Title="NAPVIEW Installer"
           BeginPrompt="This will install NAPVIEW. Do you want to continue?"
-          InstallPath="NAPVIEW_install"
+          InstallPath="$pwd\NAPVIEW_install"
           Progress="yes"
           FinishMessage="Do you want to launch NAPVIEW now?"
           RunProgram="NAPVIEW\NAPVIEW.exe"
@@ -103,12 +103,13 @@ jobs:
 
       - name: Install via installer
         run: |
-          .\NAPVIEW_installer.exe -y
+          Start-Process -FilePath ".\NAPVIEW_installer.exe" -ArgumentList "-y" -Wait
 
       - name: Launch NAPVIEW
         run: |
-          if (-not (Test-Path ".\\NAPVIEW_install\\NAPVIEW\\NAPVIEW.exe")) { Get-ChildItem -Recurse -Depth 3 ".\\NAPVIEW_install"; throw "NAPVIEW.exe not found under .\\NAPVIEW_install\\NAPVIEW"; }
-          Start-Process -FilePath ".\NAPVIEW_install\NAPVIEW\NAPVIEW.exe" -WorkingDirectory ".\NAPVIEW_install\NAPVIEW"
+          $exePath = "$pwd\\NAPVIEW_install\\NAPVIEW\\NAPVIEW.exe"
+          if (-not (Test-Path $exePath)) { throw "NAPVIEW.exe not found at $exePath"; }
+          Start-Process -FilePath $exePath -WorkingDirectory "$pwd\\NAPVIEW_install\\NAPVIEW"
           Start-Sleep -Seconds 10
 
       - name: Capture screenshots

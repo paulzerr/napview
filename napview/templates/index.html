@@ -42,10 +42,11 @@
     <div id="chartWrapper"></div>
     <div class="chart-page">
         <div class="chart-toolbar">
-            <label class="zoom-control" for="zoomSlider">
-                Zoom
-                <input id="zoomSlider" type="range" min="0.5" max="10" step="0.1" value="1">
-            </label>
+            <div class="zoom-control">
+                <label for="zoomSlider">Zoom</label>
+                <input id="zoomSlider" type="range" min="2" max="600" step="1" value="120">
+                <div class="zoom-note">Note: you can also zoom via mouse wheel</div>
+            </div>
             <button id="colorOptionsButton">Colors</button>
         </div>
         <div class="chart-container">
@@ -97,27 +98,6 @@
                 <label for="paletteSelect">Palette</label>
                 <select id="paletteSelect"></select>
             </div>
-            <div class="dialog-section">
-                <div class="dialog-subtitle">Plot</div>
-                <div class="color-grid">
-                    <div class="color-row">
-                        <span>Background</span>
-                        <input id="plotBackground" type="color">
-                    </div>
-                    <div class="color-row">
-                        <span>Grid</span>
-                        <input id="plotGrid" type="color">
-                    </div>
-                    <div class="color-row">
-                        <span>Axis text</span>
-                        <input id="plotAxisText" type="color">
-                    </div>
-                    <div class="color-row">
-                        <span>Legend text</span>
-                        <input id="plotLegendText" type="color">
-                    </div>
-                </div>
-            </div>
             <div class="dialog-section dialog-columns">
                 <div>
                     <div class="dialog-subtitle">Sleep staging</div>
@@ -129,10 +109,8 @@
                 </div>
             </div>
             <div class="dialog-actions">
-                <button id="resetColors">Reset colors</button>
-                <button id="duplicateColors">Duplicate to custom</button>
-                <button id="saveColors">Save</button>
-                <button id="closeColors">Close</button>
+                <button id="closeColors">Cancel</button>
+                <button id="saveColors">Apply</button>
             </div>
         </div>
     </div>

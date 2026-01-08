@@ -23,52 +23,23 @@ const PALETTES = {
     }
 };
 const DEFAULT_PALETTE = "okabe-ito";
-const CUSTOM_LIMIT = 3;
-const CUSTOM_PREFIX = "Custom ";
+const CUSTOM_PALETTE = "custom";
 const DEFAULT_THEME = {
     background: "#1e1e1e",
     grid: "#cfcfcf",
     axisText: "#ffffff",
     legendText: "#ffffff"
 };
+const ZOOM_MIN_MINUTES = 2;
+const ZOOM_MAX_MINUTES = 120;
 
 function paletteSlice(name, count) {
     const palette = PALETTES[name] || PALETTES[DEFAULT_PALETTE];
     return palette.colors.slice(0, count);
 }
 
-function normalizeCustomPalettes(raw) {
-    const list = Array.isArray(raw) ? raw : [];
-    const normalized = [];
-    for (const entry of list) {
-        if (!entry || typeof entry !== 'object') {
-            continue;
-        }
-        const name = typeof entry.name === 'string' ? entry.name : `${CUSTOM_PREFIX}${normalized.length + 1}`;
-        const colors = entry.colors && typeof entry.colors === 'object' ? entry.colors : {};
-        const theme = entry.theme && typeof entry.theme === 'object' ? entry.theme : {};
-        normalized.push({
-            name,
-            colors: {
-                chart1: Array.isArray(colors.chart1) ? colors.chart1 : [],
-                chart2: Array.isArray(colors.chart2) ? colors.chart2 : []
-            },
-            theme: {
-                background: typeof theme.background === 'string' ? theme.background : DEFAULT_THEME.background,
-                grid: typeof theme.grid === 'string' ? theme.grid : DEFAULT_THEME.grid,
-                axisText: typeof theme.axisText === 'string' ? theme.axisText : DEFAULT_THEME.axisText,
-                legendText: typeof theme.legendText === 'string' ? theme.legendText : DEFAULT_THEME.legendText
-            }
-        });
-        if (normalized.length >= CUSTOM_LIMIT) {
-            break;
-        }
-    }
-    return normalized;
-}
-
-function findCustomPalette(palettes, name) {
-    return palettes.find(palette => palette.name === name);
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
 }
 
 class DataPlotter {
@@ -116,6 +87,10 @@ class DataPlotter {
                     this.config.theme,
                     this.config.onZoomChange
                 );
+                if (typeof this.config.onZoomChange === 'function') {
+                    const domain = this.chart.xScale.domain();
+                    this.config.onZoomChange(domain[1] - domain[0]);
+                }
             } else {
                 this.chart.update(this.dataSets);
             }
@@ -189,43 +164,30 @@ async function loadColorConfig() {
         const response = await fetch('/load_config');
         const config = await response.json();
         let palette = typeof config.chart_palette === 'string' ? config.chart_palette : DEFAULT_PALETTE;
+        if (!PALETTES[palette] && palette !== CUSTOM_PALETTE) {
+            palette = DEFAULT_PALETTE;
+        }
         const storedTheme = config.chart_theme && typeof config.chart_theme === 'object' ? config.chart_theme : {};
-        const defaults = defaultColorsForPalette(palette);
+        const defaults = defaultColorsForPalette(DEFAULT_PALETTE);
         const stored = config.chart_colors && typeof config.chart_colors === 'object' ? config.chart_colors : {};
-        let customPalettes = normalizeCustomPalettes(config.chart_custom_palettes);
-        if (palette === 'custom' && customPalettes.length === 0) {
-            const fallbackColors = {
-                chart1: Array.isArray(stored.chart1) ? stored.chart1 : defaults.chart1,
-                chart2: Array.isArray(stored.chart2) ? stored.chart2 : defaults.chart2
-            };
-            const fallbackTheme = {
+        const customColors = {
+            chart1: Array.isArray(stored.chart1) ? stored.chart1 : defaults.chart1,
+            chart2: Array.isArray(stored.chart2) ? stored.chart2 : defaults.chart2
+        };
+        const activeColors = palette === CUSTOM_PALETTE ? customColors : defaultColorsForPalette(palette);
+        return {
+            palette,
+            colors: {
+                chart1: activeColors.chart1,
+                chart2: activeColors.chart2
+            },
+            theme: {
                 background: typeof storedTheme.background === 'string' ? storedTheme.background : DEFAULT_THEME.background,
                 grid: typeof storedTheme.grid === 'string' ? storedTheme.grid : DEFAULT_THEME.grid,
                 axisText: typeof storedTheme.axisText === 'string' ? storedTheme.axisText : DEFAULT_THEME.axisText,
                 legendText: typeof storedTheme.legendText === 'string' ? storedTheme.legendText : DEFAULT_THEME.legendText
-            };
-            const customName = `${CUSTOM_PREFIX}1`;
-            customPalettes = [{
-                name: customName,
-                colors: fallbackColors,
-                theme: fallbackTheme
-            }];
-            palette = customName;
-        }
-        const selectedCustom = findCustomPalette(customPalettes, palette);
-        return {
-            palette,
-            colors: {
-                chart1: selectedCustom ? selectedCustom.colors.chart1 : defaults.chart1,
-                chart2: selectedCustom ? selectedCustom.colors.chart2 : defaults.chart2
             },
-            theme: {
-                background: selectedCustom ? selectedCustom.theme.background : (typeof storedTheme.background === 'string' ? storedTheme.background : DEFAULT_THEME.background),
-                grid: selectedCustom ? selectedCustom.theme.grid : (typeof storedTheme.grid === 'string' ? storedTheme.grid : DEFAULT_THEME.grid),
-                axisText: selectedCustom ? selectedCustom.theme.axisText : (typeof storedTheme.axisText === 'string' ? storedTheme.axisText : DEFAULT_THEME.axisText),
-                legendText: selectedCustom ? selectedCustom.theme.legendText : (typeof storedTheme.legendText === 'string' ? storedTheme.legendText : DEFAULT_THEME.legendText)
-            },
-            customPalettes
+            customColors
         };
     } catch (error) {
         console.error('Error loading color config:', error);
@@ -233,7 +195,7 @@ async function loadColorConfig() {
             palette: DEFAULT_PALETTE,
             colors: defaultColorsForPalette(DEFAULT_PALETTE),
             theme: { ...DEFAULT_THEME },
-            customPalettes: []
+            customColors: defaultColorsForPalette(DEFAULT_PALETTE)
         };
     }
 }
@@ -265,22 +227,20 @@ function buildColorList(container, labels, colors, onInput) {
     });
 }
 
-function setupColorDialog(initialPalette, initialColors, initialTheme, initialCustomPalettes) {
+function setupColorDialog(initialPalette, initialColors, initialCustomColors) {
     const dialog = document.getElementById('colorDialog');
     const openButton = document.getElementById('colorOptionsButton');
-    const closeButton = document.getElementById('closeColors');
-    const saveButton = document.getElementById('saveColors');
-    const resetButton = document.getElementById('resetColors');
-    const duplicateButton = document.getElementById('duplicateColors');
+    const cancelButton = document.getElementById('closeColors');
+    const applyButton = document.getElementById('saveColors');
     const paletteSelect = document.getElementById('paletteSelect');
     const chart1List = document.getElementById('chart1ColorList');
     const chart2List = document.getElementById('chart2ColorList');
-    const plotBackground = document.getElementById('plotBackground');
-    const plotGrid = document.getElementById('plotGrid');
-    const plotAxisText = document.getElementById('plotAxisText');
-    const plotLegendText = document.getElementById('plotLegendText');
-    let customPalettes = initialCustomPalettes.slice();
-    let baseTheme = { ...initialTheme };
+    let currentState = {
+        palette: initialPalette,
+        colors: initialColors,
+        customColors: { ...initialCustomColors }
+    };
+    let draftState = null;
 
     function refreshPaletteOptions(selectedValue) {
         paletteSelect.innerHTML = '';
@@ -290,179 +250,113 @@ function setupColorDialog(initialPalette, initialColors, initialTheme, initialCu
             option.textContent = palette.label;
             paletteSelect.appendChild(option);
         });
-        customPalettes.forEach((customPalette) => {
-            const option = document.createElement('option');
-            option.value = customPalette.name;
-            option.textContent = customPalette.name;
-            paletteSelect.appendChild(option);
-        });
-        if (selectedValue) {
-            paletteSelect.value = selectedValue;
-        }
+        const customOption = document.createElement('option');
+        customOption.value = CUSTOM_PALETTE;
+        customOption.textContent = 'Custom';
+        paletteSelect.appendChild(customOption);
+        paletteSelect.value = selectedValue;
     }
 
-    const markCustom = () => {
-        const selected = paletteSelect.value;
-        const isCustom = !!findCustomPalette(customPalettes, selected);
-        if (!isCustom) {
+    function readColors() {
+        return {
+            chart1: Array.from(chart1List.querySelectorAll('input[type="color"]')).map(input => input.value),
+            chart2: Array.from(chart2List.querySelectorAll('input[type="color"]')).map(input => input.value)
+        };
+    }
+
+    function applyColors(colors) {
+        buildColorList(chart1List, chart1Config.labels.slice(2), colors.chart1, handleColorInput);
+        buildColorList(chart2List, chart2Config.labels.slice(2), colors.chart2, handleColorInput);
+    }
+
+    function ensureValidPalette(value) {
+        if (value === CUSTOM_PALETTE || PALETTES[value]) {
+            return value;
+        }
+        return DEFAULT_PALETTE;
+    }
+
+    function renderFromState(state) {
+        const palette = ensureValidPalette(state.palette);
+        const colors = palette === CUSTOM_PALETTE ? state.customColors : defaultColorsForPalette(palette);
+        refreshPaletteOptions(palette);
+        applyColors(colors);
+    }
+
+    function handleColorInput() {
+        if (!draftState) {
             return;
         }
-    };
-
-    const applyColors = (colors) => {
-        buildColorList(chart1List, chart1Config.labels.slice(2), colors.chart1, markCustom);
-        buildColorList(chart2List, chart2Config.labels.slice(2), colors.chart2, markCustom);
-    };
-
-    function applyTheme(theme) {
-        plotBackground.value = theme.background;
-        plotGrid.value = theme.grid;
-        plotAxisText.value = theme.axisText;
-        plotLegendText.value = theme.legendText;
-    }
-
-    function isCustomSelection() {
-        return !!findCustomPalette(customPalettes, paletteSelect.value);
-    }
-
-    function updateEditability() {
-        const editable = isCustomSelection();
-        chart1List.querySelectorAll('input[type="color"]').forEach(input => {
-            input.disabled = !editable;
-        });
-        chart2List.querySelectorAll('input[type="color"]').forEach(input => {
-            input.disabled = !editable;
-        });
-        plotBackground.disabled = !editable;
-        plotGrid.disabled = !editable;
-        plotAxisText.disabled = !editable;
-        plotLegendText.disabled = !editable;
-        duplicateButton.disabled = customPalettes.length >= CUSTOM_LIMIT;
+        const selected = paletteSelect.value;
+        if (selected !== CUSTOM_PALETTE) {
+            draftState.customColors = readColors();
+            draftState.palette = CUSTOM_PALETTE;
+            paletteSelect.value = CUSTOM_PALETTE;
+        } else {
+            draftState.customColors = readColors();
+        }
     }
 
     paletteSelect.addEventListener('change', () => {
-        const selected = paletteSelect.value;
-        const custom = findCustomPalette(customPalettes, selected);
-        if (custom) {
-            applyColors(custom.colors);
-            applyTheme(custom.theme);
+        if (!draftState) {
+            return;
+        }
+        const selected = ensureValidPalette(paletteSelect.value);
+        draftState.palette = selected;
+        if (selected === CUSTOM_PALETTE) {
+            applyColors(draftState.customColors);
         } else {
             applyColors(defaultColorsForPalette(selected));
-            applyTheme(baseTheme);
         }
-        updateEditability();
     });
 
-    refreshPaletteOptions(initialPalette);
-    paletteSelect.value = PALETTES[initialPalette] || findCustomPalette(customPalettes, initialPalette) ? initialPalette : DEFAULT_PALETTE;
-    applyColors(initialColors);
-    applyTheme(initialTheme);
-    updateEditability();
-
     openButton.addEventListener('click', () => {
+        draftState = {
+            palette: currentState.palette,
+            colors: currentState.colors,
+            customColors: { ...currentState.customColors }
+        };
+        renderFromState(draftState);
         dialog.style.display = 'flex';
     });
 
-    closeButton.addEventListener('click', () => {
+    cancelButton.addEventListener('click', () => {
         dialog.style.display = 'none';
     });
 
-    resetButton.addEventListener('click', () => {
-        paletteSelect.value = DEFAULT_PALETTE;
-        applyColors(defaultColorsForPalette(DEFAULT_PALETTE));
-        applyTheme(DEFAULT_THEME);
-        updateEditability();
-    });
-
-    duplicateButton.addEventListener('click', () => {
-        if (customPalettes.length >= CUSTOM_LIMIT) {
+    applyButton.addEventListener('click', async () => {
+        if (!draftState) {
             return;
         }
-        const usedNames = new Set(customPalettes.map(palette => palette.name));
-        let nextName = "";
-        for (let i = 1; i <= CUSTOM_LIMIT; i += 1) {
-            const name = `${CUSTOM_PREFIX}${i}`;
-            if (!usedNames.has(name)) {
-                nextName = name;
-                break;
-            }
-        }
-        if (!nextName) {
-            return;
-        }
-        const chart1Colors = Array.from(chart1List.querySelectorAll('input[type="color"]')).map(input => input.value);
-        const chart2Colors = Array.from(chart2List.querySelectorAll('input[type="color"]')).map(input => input.value);
-        const theme = {
-            background: plotBackground.value,
-            grid: plotGrid.value,
-            axisText: plotAxisText.value,
-            legendText: plotLegendText.value
+        const paletteToSave = ensureValidPalette(paletteSelect.value);
+        let appliedColors = null;
+        const updates = {
+            chart_palette: paletteToSave
         };
-        customPalettes.push({
-            name: nextName,
-            colors: { chart1: chart1Colors, chart2: chart2Colors },
-            theme
-        });
-        refreshPaletteOptions(nextName);
-        paletteSelect.value = nextName;
-        updateEditability();
-    });
-
-    saveButton.addEventListener('click', async () => {
-        const paletteToSave = paletteSelect.value;
-        const isCustom = isCustomSelection();
-        const themeToSave = {
-            background: plotBackground.value,
-            grid: plotGrid.value,
-            axisText: plotAxisText.value,
-            legendText: plotLegendText.value
-        };
-        let chart1Colors = [];
-        let chart2Colors = [];
-        if (isCustom) {
-            chart1Colors = Array.from(chart1List.querySelectorAll('input[type="color"]')).map(input => input.value);
-            chart2Colors = Array.from(chart2List.querySelectorAll('input[type="color"]')).map(input => input.value);
-            const selectedCustom = findCustomPalette(customPalettes, paletteToSave);
-            if (selectedCustom) {
-                selectedCustom.colors = { chart1: chart1Colors, chart2: chart2Colors };
-                selectedCustom.theme = themeToSave;
-            }
+        if (paletteToSave === CUSTOM_PALETTE) {
+            draftState.customColors = readColors();
+            appliedColors = draftState.customColors;
+            updates.chart_colors = appliedColors;
         } else {
-            chart1Colors = defaultColorsForPalette(paletteToSave).chart1;
-            chart2Colors = defaultColorsForPalette(paletteToSave).chart2;
+            appliedColors = defaultColorsForPalette(paletteToSave);
         }
 
-        const saved = await saveColorConfig({
-            chart_palette: paletteToSave,
-            chart_colors: {
-                chart1: chart1Colors,
-                chart2: chart2Colors
-            },
-            chart_theme: {
-                background: themeToSave.background,
-                grid: themeToSave.grid,
-                axisText: themeToSave.axisText,
-                legendText: themeToSave.legendText
-            },
-            chart_custom_palettes: customPalettes
-        });
-
+        const saved = await saveColorConfig(updates);
         if (saved) {
-            chart1Config.colors = chart1Colors;
-            chart2Config.colors = chart2Colors;
-            chart1Config.theme = {
-                background: themeToSave.background,
-                grid: themeToSave.grid,
-                axisText: themeToSave.axisText,
-                legendText: themeToSave.legendText
-            };
-            chart2Config.theme = { ...chart1Config.theme };
-            baseTheme = { ...chart1Config.theme };
+            chart1Config.colors = appliedColors.chart1;
+            chart2Config.colors = appliedColors.chart2;
             chart1Plotter.reset();
             chart2Plotter.reset();
+            currentState = {
+                palette: paletteToSave,
+                colors: appliedColors,
+                customColors: { ...draftState.customColors }
+            };
             dialog.style.display = 'none';
         }
     });
+
+    renderFromState(currentState);
 }
 
 async function initCharts() {
@@ -473,23 +367,31 @@ async function initCharts() {
     chart2Config.theme = { ...config.theme };
     const zoomSlider = document.getElementById('zoomSlider');
     if (zoomSlider) {
-        chart1Config.onZoomChange = (zoomLevel) => {
-            const currentMax = parseFloat(zoomSlider.max);
-            if (zoomLevel > currentMax) {
-                zoomSlider.max = zoomLevel.toFixed(1);
+        zoomSlider.min = String(ZOOM_MIN_MINUTES);
+        zoomSlider.max = String(ZOOM_MAX_MINUTES);
+        zoomSlider.step = "1";
+        chart1Config.onZoomChange = (windowMs) => {
+            if (!Number.isFinite(windowMs) || windowMs <= 0) {
+                return;
             }
-            zoomSlider.value = zoomLevel.toFixed(2);
+            const minutes = clamp(windowMs / 60000, ZOOM_MIN_MINUTES, ZOOM_MAX_MINUTES);
+            zoomSlider.value = minutes.toFixed(0);
         };
         zoomSlider.addEventListener('input', () => {
-            const zoomLevel = parseFloat(zoomSlider.value);
             if (!chart1Plotter.chart || !chart1Plotter.chart.zoomBehavior) {
                 return;
             }
-            const center = [chart1Plotter.chart.width, chart1Plotter.chart.height / 2];
-            chart1Plotter.chart.zoomBehavior.scaleTo(chart1Plotter.chart.zoomTarget, zoomLevel, center);
+            const domain = chart1Plotter.chart.xScale.domain();
+            const baseSpanMs = domain[1] - domain[0];
+            if (!Number.isFinite(baseSpanMs) || baseSpanMs <= 0) {
+                return;
+            }
+            const minutes = clamp(parseFloat(zoomSlider.value), ZOOM_MIN_MINUTES, ZOOM_MAX_MINUTES);
+            const zoomLevel = baseSpanMs / (minutes * 60000);
+            chart1Plotter.chart.zoomBehavior.scaleTo(chart1Plotter.chart.zoomTarget, zoomLevel);
         });
     }
-    setupColorDialog(config.palette, config.colors, config.theme, config.customPalettes);
+    setupColorDialog(config.palette, config.colors, config.customColors);
     chart1Plotter.startPlotting();
     chart2Plotter.startPlotting();
 }
