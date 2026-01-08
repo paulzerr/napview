@@ -114,13 +114,8 @@ class DataProducer:
 
                 returnStream += databytes
 
-            except socket.timeout:
-                raise ConnectionError("Socket timed out waiting for data from amp.")
-
             except Exception as e:
                 self.logger.error(f"Producer: Error receiving data chunk: {e}", exc_info=True)
-                # Convert any other errors into a ConnectionError to unify our reconnection logic
-                raise ConnectionError(f"Error receiving data chunk: {e}")
 
         return returnStream
 
@@ -134,8 +129,6 @@ class DataProducer:
             (id1, id2, id3, id4, message_size, message_type) = unpack('<llllLL', rraw_message_header)
             raw_data_chunk = self.receive_data_chunk(message_size - 24)
             return raw_data_chunk, message_type
-        except ConnectionError as e:
-            raise ConnectionError(str(e))
         except Exception as e:
             self.logger.error(f"Producer: Error unpacking raw message: {e}", exc_info=True)
             raise
@@ -150,9 +143,6 @@ class DataProducer:
                 lastBlock = block
                 return data, lastBlock
             return None, lastBlock
-        except ConnectionError as ce:
-            # Bubble up so the data loop can handle reconnection logic
-            raise ConnectionError(str(ce))
         except Exception as e:
             self.logger.error(f"Producer: Error getting data chunk: {e}", exc_info=True)
 
