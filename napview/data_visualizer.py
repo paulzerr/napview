@@ -5,7 +5,7 @@ import webbrowser
 import logging
 from threading import Timer
 
-from .helpers import configure_logger, ConfigManager
+from .helpers import configure_logger, ConfigManager, get_resource_root
 from .database_handler import DatabaseHandler
 
 class Visualizer:
@@ -15,7 +15,10 @@ class Visualizer:
 
     def __init__(self, base_path, mode):
         self.base_path = base_path
-        self.app = Flask(__name__)
+        resource_root = get_resource_root()
+        template_folder = str(resource_root / "templates")
+        static_folder = str(resource_root / "static")
+        self.app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.ERROR)
         log.disabled = True
@@ -97,7 +100,7 @@ class Visualizer:
 
 class DataLoader:
     def __init__(self, data_file, desired_fields, base_path):
-        self.data_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), data_file)
+        self.data_file = str(get_resource_root() / data_file)
         self.desired_fields = desired_fields
         self.logger = configure_logger(base_path)
 

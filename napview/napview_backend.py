@@ -10,7 +10,6 @@ import threading
 from pathlib import Path
 import webbrowser
 import socket
-import sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from email.parser import BytesParser
 from email.policy import default
@@ -21,7 +20,7 @@ from .data_recorder import DataRecorder
 from .data_analyzer import Analyzer
 from .data_visualizer import Visualizer
 from .database_handler import DatabaseHandler
-from .helpers import configure_logger, ConfigManager
+from .helpers import configure_logger, ConfigManager, get_resource_root
 
 
 class ProcessManager:
@@ -404,10 +403,7 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
 
 def main():
 
-    if getattr(sys, "frozen", False):
-        app_root = Path(sys.executable).resolve().parent
-    else:
-        app_root = Path(__file__).resolve().parent.parent
+    app_root = get_resource_root().parent
 
     #########################################
     ###  ESTABLISH BASE PATH
@@ -460,7 +456,7 @@ def main():
 
     # copy default eeg file to data folder
     eeg_file_name = 'eeg.edf'
-    src_eeg_file_path = app_root / "napview" / eeg_file_name
+    src_eeg_file_path = get_resource_root() / eeg_file_name
     dest_eeg_file_path = base_path / eeg_file_name
     if not dest_eeg_file_path.exists():
         try:
@@ -523,7 +519,7 @@ def main():
         logger.info(f"      {key}: {value}")
 
     # start http request handler
-    root_dir = app_root / "napview"
+    root_dir = get_resource_root()
     gui_server_handler = lambda *args, **kwargs: NapviewRequestHandler(
         *args,
         directory=root_dir,
