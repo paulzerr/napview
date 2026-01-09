@@ -67,6 +67,13 @@ class ConfigManager:
         else:
             try:
                 self.load_config()
+                defaults_path = get_resource_root() / "CONFIG_DEFAULTS.txt"
+                with open(defaults_path, 'r') as file:
+                    defaults_config = json.load(file)
+                missing = {k: v for k, v in defaults_config.items() if k not in self.config}
+                if missing:
+                    self.save_config(missing)
+                    self.load_config()
             except Exception as e:
                 self.logger.error(f"Error loading config during initialization: {e}", exc_info=True)
 

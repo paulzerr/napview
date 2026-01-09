@@ -19,7 +19,7 @@ import sys
 
 from .data_producer import DataProducer
 from .data_recorder import DataRecorder
-from .data_analyzer import Analyzer, BandpowerAnalyzer
+from .data_analyzer import Analyzer
 from .data_visualizer import Visualizer
 from .database_handler import DatabaseHandler
 from .helpers import configure_logger, ConfigManager, get_resource_root
@@ -73,7 +73,6 @@ class ProcessManager:
             'producer': (DataProducer, {'mode': self.config.get('eeg_amp', 'Simulator')}),
             'recorder': (DataRecorder, {'mode': ''}),
             'analyzer': (Analyzer, {'mode': self.config.get('sleep_staging_model', 'U-Sleep')}),
-            'bandpower_analyzer': (BandpowerAnalyzer, {'mode': 'bandpower'}),
             'visualizer': (Visualizer, {'mode': ''})
         }
 
@@ -181,7 +180,7 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
                     self.process_manager.launch_components(
                         self.base_path,
                         self.config_manager,
-                        ['analyzer', 'bandpower_analyzer', 'visualizer']
+                        ['analyzer', 'visualizer']
                     )
 
             elif self.path == '/check_eeg_file':
