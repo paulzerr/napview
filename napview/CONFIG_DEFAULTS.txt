@@ -1,7 +1,7 @@
 {
     "sim_input_file_path": "eeg.edf",
     "amp_ip": "131.174.45.195",
-    "amp_port": 51244,
+    "amp_port": 51234,
     "epoch_length": 5,
     "bandpower_bands": [
         [0.5, 4, "delta"],

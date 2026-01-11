@@ -11,7 +11,7 @@
 <script>
   const DESIGN_WIDTH = 1920;
   const DESIGN_HEIGHT = 1080;
-  const SCALE_MULTIPLIER = 1.1;
+  const SCALE_MULTIPLIER = 1.2;
 
   function updateScale() {
     const baseScale = Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
@@ -26,7 +26,7 @@
   :root {
     --scale: 1;
     --base-unit: 16px;
-    --base-font: 16px;
+    --base-font: 18px;
     --unit: calc(var(--base-unit) * var(--scale));
     --font-size: calc(var(--base-font) * var(--scale));
     --font-size-small: calc(12px * var(--scale));
@@ -228,6 +228,17 @@
     overflow: hidden;
     direction: ltr;
   }
+  .file-input-row.data-dir-row {
+    width: 100%;
+  }
+  .data-dir-row .file-path-input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .data-dir-row .button {
+    flex: 0 0 auto;
+    width: auto;
+  }
   /* Dialog */
   .dialog {
     position: fixed;
@@ -282,6 +293,14 @@
     <div class="column-title">Controls</div>
     <div class="instructions">
       Welcome to napview, the real-time sleep staging dashboard!<br><br>[1] Read the <a href="https://github.com/paulzerr/napview_beta">[manual]</a><br>[2] Select EEG amplifier<br>[3] Select sleep scoring model. <br>[4] Follow further instructions on the right (if any). <br>[5] When everything is green, click START to begin! <br><br>
+    </div>
+
+    <div class="control-group">
+      <label for="base_path" class="label">Data directory:</label>
+      <div class="file-input-row data-dir-row">
+        <input id="base_path" type="text" class="file-path-input" readonly>
+        <button id="browseDataDirButton" class="button" type="button">Browse</button>
+      </div>
     </div>
 
     <div class="control-group">

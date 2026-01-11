@@ -10,12 +10,16 @@ import threading
 from pathlib import Path
 import webbrowser
 import socket
+import platform
+import subprocess
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from email.parser import BytesParser
 from email.policy import default
 import mne
 
 import sys
+
+from appdirs import user_data_dir
 
 from .data_producer import DataProducer
 from .data_recorder import DataRecorder
@@ -83,6 +87,85 @@ class ProcessManager:
                 self.start_process(component, component_class, **kwargs)
 
 
+dialog_lock = threading.Lock()
+
+
+def get_default_base_path():
+    return Path(user_data_dir()) / "napview" / "data"
+
+
+def init_base_path(base_path, logger):
+    try:
+        data_path = Path(base_path) / "temp"
+        data_path.mkdir(parents=True, exist_ok=True)
+        (data_path / "db").mkdir(parents=True, exist_ok=True)
+        logger.info(f'Init: Data directories created in {base_path}')
+    except Exception as e:
+        logger.error(f'Init: Failed to create data directories in {base_path} : {str(e)}', exc_info=True)
+
+    eeg_file_name = 'eeg.edf'
+    src_eeg_file_path = get_resource_root() / eeg_file_name
+    dest_eeg_file_path = Path(base_path) / eeg_file_name
+    if not dest_eeg_file_path.exists():
+        try:
+            shutil.copy(src_eeg_file_path, dest_eeg_file_path)
+            logger.info(f"Init: Copied simulation {eeg_file_name} to {base_path}")
+        except Exception as e:
+            logger.error(f"Init: Failed to copy {eeg_file_name}: {e}", exc_info=True)
+
+
+def open_native_directory_dialog(logger, title):
+    if not dialog_lock.acquire(blocking=False):
+        logger.warning("File dialog blocked because another is already open.")
+        return {'status': 'error', 'message': 'Another file dialog is already open.'}
+
+    try:
+        if platform.system() == "Darwin":
+            script = f'POSIX path of (choose folder with prompt "{title}")'
+            try:
+                out = subprocess.check_output(["osascript", "-e", script], text=True)
+                path = out.strip()
+                if path:
+                    return {'status': 'success', 'path': path}
+                return {'status': 'cancelled'}
+            except subprocess.CalledProcessError:
+                return {'status': 'cancelled'}
+            except Exception as e:
+                logger.error(f"AppleScript dialog failed: {e}", exc_info=True)
+                return {'status': 'error', 'message': 'Could not open the dialog.'}
+
+        result = {}
+        def open_dialog_thread():
+            import tkinter as tk
+            from tkinter import filedialog
+            try:
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                path = filedialog.askdirectory(title=title)
+                if path:
+                    result['path'] = path
+            except Exception as e:
+                logger.error(f"An error occurred in the tkinter dialog thread: {e}", exc_info=True)
+                result['error'] = "Could not open the file dialog. Please ensure you have a graphical environment configured."
+            finally:
+                if 'root' in locals() and root:
+                    root.destroy()
+
+        dialog_thread = threading.Thread(target=open_dialog_thread)
+        dialog_thread.start()
+        dialog_thread.join()
+
+        if 'error' in result:
+            return {'status': 'error', 'message': result['error']}
+        if 'path' in result:
+            return {'status': 'success', 'path': result['path']}
+        return {'status': 'cancelled'}
+    finally:
+        if dialog_lock.locked():
+            dialog_lock.release()
+
+
 class NapviewRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, process_manager=None, base_path=None, config_manager=None, db_handler=None, logger=None, **kwargs):
         self.process_manager = process_manager
@@ -111,6 +194,30 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(self.config).encode('utf-8'))
+            return
+
+        elif self.path == '/select-data-dir':
+            if self.process_manager.any_process_running():
+                response = {'status': 'error', 'message': 'Stop napview before changing the data directory.'}
+                self.send_response(409)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                return
+
+            result = open_native_directory_dialog(self.logger, "Select Napview data folder")
+            if result.get('status') == 'success':
+                update_result = self.update_base_path(result.get('path'))
+                response = update_result
+                status_code = 200 if update_result.get('status') == 'success' else 500
+            else:
+                response = result
+                status_code = 200 if result.get('status') != 'error' else 500
+
+            self.send_response(status_code)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode('utf-8'))
             return
 
         try:
@@ -324,6 +431,39 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
         self.server.server_close()
         self.logger.info("Shutdown: Server shut down successfully.")
 
+    def update_base_path(self, new_base_path):
+        try:
+            new_base_path = Path(new_base_path).expanduser().resolve()
+        except Exception as e:
+            return {'status': 'error', 'message': f'Invalid data directory: {e}'}
+
+        try:
+            new_base_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return {'status': 'error', 'message': f'Failed to create data directory: {e}'}
+
+        with self.config_manager.config_lock:
+            current_config = self.config_manager.load_config()
+
+        if self.db_handler:
+            self.db_handler.close()
+
+        init_base_path(new_base_path, self.logger)
+
+        new_config_manager = ConfigManager(new_base_path, load_defaults=True)
+        current_config['base_path'] = str(new_base_path)
+        new_config_manager.save_config(current_config)
+        self.config_manager = new_config_manager
+
+        log_filename = current_config.get('log_file_name', 'napview_log.log')
+        self.logger = configure_logger(new_base_path, log_filename=log_filename, force=True)
+
+        self.base_path = new_base_path
+        self.db_handler = DatabaseHandler(new_base_path)
+        self.db_handler.setup_database(create_tables=True)
+
+        return {'status': 'success', 'path': str(new_base_path)}
+
     def validate_eeg_file(self):
         try:
             self.config = self.config_manager.load_config(instance=self)
@@ -416,15 +556,8 @@ def main():
 
     #########################################
     ###  ESTABLISH BASE PATH
-    try:
-        base_path = app_root / "data"
-        base_path.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        try:
-            base_path = Path.home() / "data"
-            base_path.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            raise
+    base_path = get_default_base_path()
+    base_path.mkdir(parents=True, exist_ok=True)
 
 
     #########################################
@@ -441,18 +574,10 @@ def main():
 
     #########################################
     ###  MAKE PATHS AND FOLDERS
-    try:
-        data_path = os.path.join(base_path, "temp")
-        os.makedirs(data_path, exist_ok=True)
-        os.makedirs(os.path.join(data_path, "db"), exist_ok=True)
-        #os.makedirs(os.path.join(data_path, "results"), exist_ok=True)
-        #os.makedirs(os.path.join(data_path, "edfs"), exist_ok=True)
-        #os.makedirs(os.path.join(data_path, "output"), exist_ok=True)
-        logger.info(f'Init: Data directories created in {base_path}')
-    except Exception as e:
-        logger.error(f'Init: Failed to create data directories in {base_path} : {str(e)}', exc_info=True)
+    init_base_path(base_path, logger)
 
     try:
+        data_path = os.path.join(base_path, "temp")
         for root, dirs, files in os.walk(data_path):
             # if root == os.path.join(data_path, "db"):
             #     continue
@@ -462,18 +587,6 @@ def main():
                 logger.info(f"Init: Deleted file: {file_path}")
     except Exception as e:
         logger.error(f'Init: Failed to remove old db files : {str(e)}', exc_info=True)
-
-    # copy default eeg file to data folder
-    eeg_file_name = 'eeg.edf'
-    src_eeg_file_path = get_resource_root() / eeg_file_name
-    dest_eeg_file_path = base_path / eeg_file_name
-    if not dest_eeg_file_path.exists():
-        try:
-            shutil.copy(src_eeg_file_path, dest_eeg_file_path)
-            logger.info(f"Init: Copied simulation {eeg_file_name} to {base_path}")
-        except Exception as e:
-            logger.error(f"Init: Failed to copy {eeg_file_name}: {e}", exc_info=True)
-
 
     ########################################
     ### INIT MANAGERS

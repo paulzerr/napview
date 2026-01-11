@@ -13,3 +13,4 @@ antropy==0.1.9
 lightgbm==4.6.0
 psg_utils
 nidra
+appdirs==1.4.4

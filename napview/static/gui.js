@@ -26,6 +26,8 @@
     lslControl: document.getElementById('lslControl'),
     lsl_stream_name: document.getElementById('lsl_stream_name'),
     record_name: document.getElementById('record_name'),
+    base_path: document.getElementById('base_path'),
+    browseDataDirButton: document.getElementById('browseDataDirButton'),
   };
 
   const state = {
@@ -54,6 +56,13 @@
             state[key] = config[key];
         }
       });
+
+      if (config.base_path) {
+        state.base_path = config.base_path;
+        if (elements.base_path) {
+          elements.base_path.value = config.base_path;
+        }
+      }
 
       if (config.app_running) {
         elements.startButton.disabled = true;
@@ -234,6 +243,22 @@
 
   function openFileDialog() {
     elements.fileInput.click();
+  }
+
+  async function openDataDirDialog() {
+    try {
+      const response = await fetch('/select-data-dir');
+      const result = await response.json();
+      if (result.status === 'success') {
+        await loadConfig();
+        await updateStatusText("<span class='green'>Data directory updated.</span>");
+      } else if (result.status === 'error') {
+        alert(`Data directory update failed: ${result.message}`);
+      }
+    } catch (error) {
+      console.error('Error selecting data directory:', error);
+      alert('Error selecting data directory. Please try again.');
+    }
   }
 
   elements.fileInput.addEventListener('change', function () {
@@ -574,6 +599,7 @@
   // });
 
   elements.loadEegButton.addEventListener('click', openFileDialog);
+  elements.browseDataDirButton.addEventListener('click', openDataDirDialog);
   elements.settingsButton.addEventListener('click', showSettingsDialog);
   elements.channelConfigButton.addEventListener('click', showChannelConfigDialog);
   elements.startButton.addEventListener('click', startApplication);
