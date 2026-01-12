@@ -117,7 +117,7 @@ jobs:
           Set-Location -Path $env:DIST_DIR
           & "C:\Program Files\7-Zip\7z.exe" a ..\NAPVIEW_archive.7z .\NAPVIEW\*
           Set-Location -Path $env:REPO_ROOT
-          cmd.exe --% /c copy /b "C:\Program Files\7-Zip\7z.sfx" + sfx_config.txt + NAPVIEW_archive.7z $env:INSTALLER_EXE
+          cmd.exe /c copy /b "C:\Program Files\7-Zip\7z.sfx"+sfx_config.txt+NAPVIEW_archive.7z "%INSTALLER_EXE%"
           if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not created at $env:INSTALLER_EXE" }
 
       - name: Install and smoke-test installer
