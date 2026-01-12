@@ -12,9 +12,8 @@ lsl_binaries = [(f, "napview/libs") for f in glob.glob("napview/libs/*")]
 final_datas = [
     ("napview/templates", "napview/templates"),
     ("napview/static", "napview/static"),
+    ("napview/assets", "napview/assets"),
     ("napview/CONFIG_DEFAULTS.txt", "napview"),
-    ("napview/eeg.edf", "napview"),
-    ("napview/favicon.ico", "napview"),
     ("nidra/nidra/NIDRA/models", "NIDRA/models"),
 ] + mne_datas
 
@@ -60,7 +59,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     manifest="NAPVIEW.manifest",
-    icon="napview/favicon.ico",
+    icon="napview/assets/favicon.ico",
 )
 
 coll = COLLECT(

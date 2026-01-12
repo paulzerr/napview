@@ -23,7 +23,6 @@ packages = { find = { include = ["napview*"] } }
     "templates/**",
     "static/**",
     "libs/**",
+    "assets/**",
     "CONFIG_DEFAULTS.txt",
-    "favicon.ico",
-    "eeg.edf",
 ]

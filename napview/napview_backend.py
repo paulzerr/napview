@@ -104,7 +104,7 @@ def init_base_path(base_path, logger):
         logger.error(f'Init: Failed to create data directories in {base_path} : {str(e)}', exc_info=True)
 
     eeg_file_name = 'eeg.edf'
-    src_eeg_file_path = get_resource_root() / eeg_file_name
+    src_eeg_file_path = get_resource_root() / "assets" / eeg_file_name
     dest_eeg_file_path = Path(base_path) / eeg_file_name
     if not dest_eeg_file_path.exists():
         try:

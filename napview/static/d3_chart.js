@@ -100,7 +100,7 @@ svg.append("text")
 
     const xAxis = d3.axisBottom(xScale)
         .ticks(numberOfXTicks)
-        .tickFormat(d3.timeFormat("%H:%M:%S"))
+        .tickFormat(d3.timeFormat("%H:%M"))
         .tickSize(-height);
 
     const yAxis = d3.axisLeft(yScale)

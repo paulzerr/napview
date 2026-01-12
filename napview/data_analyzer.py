@@ -180,7 +180,7 @@ class Analyzer:
         while True:
             time.sleep(1)
             try:
-                start_idx, end_idx, timestamp, ready = self.find_next_epoch_indices(current_epoch_index)
+                start_idx, end_idx, _data_timestamp, ready = self.find_next_epoch_indices(current_epoch_index)
                 if not ready: # if no full new un-analyzed epoch is available yet
                     continue
 
@@ -188,16 +188,17 @@ class Analyzer:
                 if epoch_data is None: 
                     continue           
                     
-                self.logger.info(f"Analyzer ({self.mode}): Running analysis for epoch {current_epoch_index} at timestamp {timestamp}...")
-                staging_result = self.predict_sleep_stage(epoch_data, timestamp)
-                bandpower_result = self.compute_bandpower_from_window(epoch_data, timestamp)
+                analysis_timestamp = time.time()
+                self.logger.info(f"Analyzer ({self.mode}): Running analysis for epoch {current_epoch_index} at timestamp {analysis_timestamp}...")
+                staging_result = self.predict_sleep_stage(epoch_data, analysis_timestamp)
+                bandpower_result = self.compute_bandpower_from_window(epoch_data, analysis_timestamp)
                 if staging_result is None or bandpower_result is None:
-                    self.logger.warning(f"Analyzer ({self.mode}): Analysis failed for epoch {current_epoch_index} at timestamp {timestamp}. Retrying...")
+                    self.logger.warning(f"Analyzer ({self.mode}): Analysis failed for epoch {current_epoch_index} at timestamp {analysis_timestamp}. Retrying...")
                     continue
                 self.db_handler.add_analysis_result(staging_result, analyzer_mode=self.mode)
                 self.db_handler.add_analysis_result(bandpower_result, analyzer_mode='bandpower')
                 self.logger.info(
-                    f"Analyzer ({self.mode}): Analysis saved for epoch {current_epoch_index} at timestamp {timestamp}."
+                    f"Analyzer ({self.mode}): Analysis saved for epoch {current_epoch_index} at timestamp {analysis_timestamp}."
                 )
                 current_epoch_index += 1
             except Exception as e:
