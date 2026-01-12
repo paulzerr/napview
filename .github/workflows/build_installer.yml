@@ -27,6 +27,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Log workspace paths
+        run: |
+          Write-Host "REPO_ROOT=$env:REPO_ROOT"
+          Write-Host "DIST_DIR=$env:DIST_DIR"
+          Write-Host "APP_DIR=$env:APP_DIR"
+          Write-Host "INSTALL_DIR=$env:INSTALL_DIR"
+          Write-Host "INSTALLER_EXE=$env:INSTALLER_EXE"
+          Write-Host "SCREENSHOT_PATH=$env:SCREENSHOT_PATH"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -95,6 +104,20 @@ jobs:
           .\venv\Scripts\python -m PyInstaller NAPVIEW.spec
           if (-not (Test-Path -Path $env:APP_DIR)) { throw "Expected app directory not found: $env:APP_DIR" }
 
+      - name: Log build outputs
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          if (Test-Path -Path $env:DIST_DIR) {
+            Get-ChildItem -Path $env:DIST_DIR -Force | Format-Table -AutoSize
+          } else {
+            throw "dist directory not found at $env:DIST_DIR"
+          }
+          if (Test-Path -Path $env:APP_DIR) {
+            Get-ChildItem -Path $env:APP_DIR -Force | Format-Table -AutoSize
+          } else {
+            throw "App directory not found at $env:APP_DIR"
+          }
+
       - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -125,8 +148,17 @@ jobs:
           Set-Location -Path $env:REPO_ROOT
           if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not found at $env:INSTALLER_EXE" }
           & $env:INSTALLER_EXE /S /D=$env:INSTALL_DIR
-          $exePath = Join-Path $env:INSTALL_DIR "NAPVIEW.exe"
-          if (-not (Test-Path -Path $exePath)) { throw "Installed executable not found at $exePath" }
+          if (Test-Path -Path $env:INSTALL_DIR) {
+            Get-ChildItem -Path $env:INSTALL_DIR -Force | Format-Table -AutoSize
+            if (Test-Path -Path (Join-Path $env:INSTALL_DIR "NAPVIEW")) {
+              Get-ChildItem -Path (Join-Path $env:INSTALL_DIR "NAPVIEW") -Force | Format-Table -AutoSize
+            }
+          } else {
+            throw "Install directory not found at $env:INSTALL_DIR"
+          }
+          $foundExe = Get-ChildItem -Path $env:INSTALL_DIR -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $foundExe) { throw "Installed executable not found under $env:INSTALL_DIR" }
+          $exePath = $foundExe.FullName
           $proc = Start-Process -FilePath $exePath -PassThru
           Start-Sleep -Seconds 10
           Add-Type -AssemblyName System.Windows.Forms
