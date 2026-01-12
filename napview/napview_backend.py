@@ -16,9 +16,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from email.parser import BytesParser
 from email.policy import default
 import mne
-
 import sys
-
 from appdirs import user_data_dir
 
 from .data_producer import DataProducer
@@ -318,7 +316,7 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
                 output_directory = os.path.join(self.base_path, 'output', timestamp)
                 os.makedirs(output_directory, exist_ok=True)
                 messages = []
-
+                
                 eeg_result = self.save_eeg_data_as_edf(self.config.get('db_file_path'), output_directory, timestamp)
                 messages.append(eeg_result['message'])
 
@@ -484,20 +482,10 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
         result = {'success': True, 'message': ''}
         try:
             eeg_info = self.db_handler.retrieve_info()
-            if eeg_info is None:
-                raise ValueError("No EEG information found in the database.")
-
             total_samples = self.db_handler.get_total_n_samples()
-            if total_samples is None or total_samples == 0:
-                raise ValueError("No EEG data found in the database.")
-
             end_sample_index = total_samples - 1
             eeg_data = self.db_handler.retrieve_data(0, end_sample_index)
-            if eeg_data is None:
-                raise ValueError("Failed to retrieve EEG data.")
-
             channel_names = json.loads(eeg_info.channel_names)
-
             info = mne.create_info(
                 ch_names=channel_names,
                 sfreq=eeg_info.sample_rate,
@@ -519,7 +507,6 @@ class NapviewRequestHandler(SimpleHTTPRequestHandler):
             self.logger.error(f"Shutdown: Unexpected error while saving EEG data: {e}", exc_info=True)
             result['success'] = False
             result['message'] = "An error occurred while saving EEG data."
-
         return result
 
     def save_results_files(self, output_directory, timestamp):

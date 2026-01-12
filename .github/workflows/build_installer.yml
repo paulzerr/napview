@@ -15,6 +15,13 @@ jobs:
     defaults:
       run:
         shell: powershell
+    env:
+      REPO_ROOT: ${{ github.workspace }}
+      DIST_DIR: ${{ github.workspace }}\dist
+      APP_DIR: ${{ github.workspace }}\dist\NAPVIEW
+      INSTALL_DIR: ${{ github.workspace }}\NAPVIEW_install
+      INSTALLER_EXE: ${{ github.workspace }}\NAPVIEW_installer.exe
+      SCREENSHOT_PATH: ${{ github.workspace }}\napview_installer_smoke.png
 
     steps:
       - name: Check out repository
@@ -38,6 +45,7 @@ jobs:
       - name: Setup Python Environment and Install Dependencies
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
+          Set-Location -Path $env:REPO_ROOT
           python -m venv venv
           .\venv\Scripts\activate
           python -m pip install --upgrade pip "setuptools<70.0.0" wheel
@@ -45,6 +53,7 @@ jobs:
 
       - name: Install project dependencies
         run: |
+          Set-Location -Path $env:REPO_ROOT
           .\venv\Scripts\activate
           python -m pip install --upgrade pip "setuptools<70.0.0"
           pip install pyinstaller toml
@@ -52,6 +61,7 @@ jobs:
 
       - name: Install Playwright
         run: |
+          Set-Location -Path $env:REPO_ROOT
           .\venv\Scripts\activate
           pip install playwright
           python -m playwright install chromium firefox msedge
@@ -66,6 +76,7 @@ jobs:
       - name: Download NIDRA models
         if: steps.cache-nidra-models.outputs.cache-hit != 'true'
         run: |
+          Set-Location -Path $env:REPO_ROOT
           New-Item -ItemType Directory -Force -Path nidra/nidra/NIDRA/models
           Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6.onnx -OutFile nidra/nidra/NIDRA/models/ez6.onnx
           Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6moe.onnx -OutFile nidra/nidra/NIDRA/models/ez6moe.onnx
@@ -74,17 +85,22 @@ jobs:
 
       - name: Enforce Setuptools version
         run: |
+          Set-Location -Path $env:REPO_ROOT
           .\venv\Scripts\activate
           python -m pip install "setuptools<70.0.0"
 
       - name: Build Executable with PyInstaller
-        run: .\venv\Scripts\python -m PyInstaller NAPVIEW.spec
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          .\venv\Scripts\python -m PyInstaller NAPVIEW.spec
+          if (-not (Test-Path -Path $env:APP_DIR)) { throw "Expected app directory not found: $env:APP_DIR" }
 
       - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Create Self-Extracting Archive
         run: |
+          Set-Location -Path $env:REPO_ROOT
           @"
           ;!@Install@!UTF-8!
           Title="NAPVIEW Installer"
@@ -95,13 +111,43 @@ jobs:
           RunProgram="NAPVIEW.exe"
           ;!@InstallEnd@!
           "@ | Set-Content -Path sfx_config.txt
-          Set-Location -Path dist
+          if (-not (Test-Path -Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip not found at C:\Program Files\7-Zip\7z.exe" }
+          if (-not (Test-Path -Path "C:\Program Files\7-Zip\7z.sfx")) { throw "7-Zip SFX module not found at C:\Program Files\7-Zip\7z.sfx" }
+          if (-not (Test-Path -Path $env:APP_DIR)) { throw "Expected app directory not found: $env:APP_DIR" }
+          Set-Location -Path $env:DIST_DIR
           & "C:\Program Files\7-Zip\7z.exe" a ..\NAPVIEW_archive.7z .\NAPVIEW\*
-          Set-Location -Path ..
-          cmd.exe --% /c copy /b "C:\Program Files\7-Zip\7z.sfx" + sfx_config.txt + NAPVIEW_archive.7z NAPVIEW_installer.exe
+          Set-Location -Path $env:REPO_ROOT
+          cmd.exe --% /c copy /b "C:\Program Files\7-Zip\7z.sfx" + sfx_config.txt + NAPVIEW_archive.7z $env:INSTALLER_EXE
+          if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not created at $env:INSTALLER_EXE" }
+
+      - name: Install and smoke-test installer
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not found at $env:INSTALLER_EXE" }
+          & $env:INSTALLER_EXE /S /D=$env:INSTALL_DIR
+          $exePath = Join-Path $env:INSTALL_DIR "NAPVIEW.exe"
+          if (-not (Test-Path -Path $exePath)) { throw "Installed executable not found at $exePath" }
+          $proc = Start-Process -FilePath $exePath -PassThru
+          Start-Sleep -Seconds 10
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bitmap.Save($env:SCREENSHOT_PATH, [System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose()
+          $bitmap.Dispose()
+          Stop-Process -Id $proc.Id -Force
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: napview-installer
-          path: NAPVIEW_installer.exe
+          path: ${{ github.workspace }}\NAPVIEW_installer.exe
+
+      - name: Upload installer screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: napview-installer-screenshot
+          path: ${{ github.workspace }}\napview_installer_smoke.png
