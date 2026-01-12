@@ -154,9 +154,12 @@ jobs:
           RunProgram="NAPVIEW.exe"
           ;!@InstallEnd@!
           "@
-          $config | Set-Content -Path sfx_config.txt
+          $config | Set-Content -Path sfx_config.txt -Encoding Ascii
           Write-Host "SFX InstallPath=$installPath"
           Get-Content -Path sfx_config.txt | ForEach-Object { Write-Host $_ }
+          Write-Host "sfx_config.txt bytes (first 64):"
+          $bytes = Get-Content -Path sfx_config.txt -Encoding Byte -TotalCount 64
+          $bytes | ForEach-Object { Write-Host ("0x{0:X2}" -f $_) }
           if (-not (Test-Path -Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip not found at C:\Program Files\7-Zip\7z.exe" }
           if (-not (Test-Path -Path "C:\Program Files\7-Zip\7z.sfx")) { throw "7-Zip SFX module not found at C:\Program Files\7-Zip\7z.sfx" }
           if (-not (Test-Path -Path $env:APP_DIR)) { throw "Expected app directory not found: $env:APP_DIR" }
@@ -182,8 +185,10 @@ jobs:
           }
           if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not found at $env:INSTALLER_EXE" }
           Write-Host "Running installer: $env:INSTALLER_EXE /S /D=$env:INSTALL_DIR"
-          & $env:INSTALLER_EXE /S /D=$env:INSTALL_DIR
-          Write-Host "Installer exit code=$LASTEXITCODE"
+          $proc = Start-Process -FilePath $env:INSTALLER_EXE -ArgumentList "/S", "/D=$env:INSTALL_DIR" -Wait -PassThru
+          Write-Host "Installer exit code=$($proc.ExitCode)"
+          Write-Host "Latest directories in repo root:"
+          Get-ChildItem -Path $env:REPO_ROOT -Directory -Force | Sort-Object LastWriteTime -Descending | Select-Object -First 10 | Format-Table -AutoSize
           if (Test-Path -Path $env:INSTALL_DIR) {
             Write-Host "Install dir tree (top):"
             Get-ChildItem -Path $env:INSTALL_DIR -Force | Format-Table -AutoSize
@@ -192,6 +197,16 @@ jobs:
               Get-ChildItem -Path (Join-Path $env:INSTALL_DIR "NAPVIEW") -Force | Format-Table -AutoSize
             }
           } else {
+            Write-Host "Searching for NAPVIEW.exe under repo root:"
+            Get-ChildItem -Path $env:REPO_ROOT -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
+            if ($env:TEMP) {
+              Write-Host "Searching for NAPVIEW.exe under TEMP=$env:TEMP"
+              Get-ChildItem -Path $env:TEMP -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
+            }
+            if ($env:TMP -and ($env:TMP -ne $env:TEMP)) {
+              Write-Host "Searching for NAPVIEW.exe under TMP=$env:TMP"
+              Get-ChildItem -Path $env:TMP -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
+            }
             throw "Install directory not found at $env:INSTALL_DIR"
           }
           Write-Host "Install dir tree (full):"
