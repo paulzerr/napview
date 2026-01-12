@@ -105,7 +105,7 @@ jobs:
           ;!@Install@!UTF-8!
           Title="NAPVIEW Installer"
           BeginPrompt="This will install NAPVIEW. Do you want to continue?"
-          InstallPath="$pwd\NAPVIEW_install"
+          InstallPath="$env:INSTALL_DIR"
           Progress="yes"
           FinishMessage="Do you want to launch NAPVIEW now?"
           RunProgram="NAPVIEW.exe"
