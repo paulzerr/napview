@@ -33,8 +33,8 @@ Note: Windows users in restricted environments without admin rights can download
 Navigate to a directory of your choice, open a terminal or command prompt and download napview:
 
    ```
-   git clone https://github.com/paulzerr/napview_beta/
-   cd napview_beta
+   git clone https://github.com/paulzerr/napview/
+   cd napview
    ```
 
 **2. Create a new virtual environment:** 
@@ -177,7 +177,7 @@ For detailed tutorials, examples, and additional resources, please refer to the 
 
 ## License
 
-```napview``` is released under the [BSD-3 Clause License](https://github.com/paulzerr/napview_beta/blob/master/LICENSE).
+```napview``` is released under the [BSD-3 Clause License](https://github.com/paulzerr/napview/blob/master/LICENSE).
 
 
 ## Contact

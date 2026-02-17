@@ -147,11 +147,8 @@ jobs:
           $config = @"
           ;!@Install@!UTF-8!
           Title="NAPVIEW Installer"
-          BeginPrompt="This will install NAPVIEW. Do you want to continue?"
           InstallPath="$installPath"
-          Progress="yes"
-          FinishMessage="Do you want to launch NAPVIEW now?"
-          RunProgram="NAPVIEW.exe"
+          Progress="no"
           ;!@InstallEnd@!
           "@
           $config | Set-Content -Path sfx_config.txt -Encoding Ascii
@@ -185,8 +182,21 @@ jobs:
           }
           if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not found at $env:INSTALLER_EXE" }
           Write-Host "Running installer: $env:INSTALLER_EXE /S /D=$env:INSTALL_DIR"
-          $proc = Start-Process -FilePath $env:INSTALLER_EXE -ArgumentList "/S", "/D=$env:INSTALL_DIR" -Wait -PassThru
+          $proc = Start-Process -FilePath $env:INSTALLER_EXE -ArgumentList "/S", "/D=$env:INSTALL_DIR" -PassThru
+          $finished = $true
+          try {
+            Wait-Process -Id $proc.Id -Timeout 180 -ErrorAction Stop
+          } catch {
+            $finished = $false
+          }
+          if (-not $finished) {
+            Write-Host "Installer did not exit within 180 seconds. Killing PID $($proc.Id)."
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw "Installer timed out after 180 seconds"
+          }
+          $proc.Refresh()
           Write-Host "Installer exit code=$($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
           Write-Host "Latest directories in repo root:"
           Get-ChildItem -Path $env:REPO_ROOT -Directory -Force | Sort-Object LastWriteTime -Descending | Select-Object -First 10 | Format-Table -AutoSize
           if (Test-Path -Path $env:INSTALL_DIR) {
