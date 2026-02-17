@@ -19,8 +19,6 @@ jobs:
       REPO_ROOT: ${{ github.workspace }}
       DIST_DIR: ${{ github.workspace }}\dist
       APP_DIR: ${{ github.workspace }}\dist\NAPVIEW
-      INSTALL_DIR: ${{ github.workspace }}\NAPVIEW_install
-      INSTALLER_EXE: ${{ github.workspace }}\NAPVIEW_installer.exe
       SCREENSHOT_PATH: ${{ github.workspace }}\napview_installer_smoke.png
 
     steps:
@@ -32,8 +30,6 @@ jobs:
           Write-Host "REPO_ROOT=$env:REPO_ROOT"
           Write-Host "DIST_DIR=$env:DIST_DIR"
           Write-Host "APP_DIR=$env:APP_DIR"
-          Write-Host "INSTALL_DIR=$env:INSTALL_DIR"
-          Write-Host "INSTALLER_EXE=$env:INSTALLER_EXE"
           Write-Host "SCREENSHOT_PATH=$env:SCREENSHOT_PATH"
 
       - name: Set up Python
@@ -118,113 +114,21 @@ jobs:
             throw "App directory not found at $env:APP_DIR"
           }
 
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Create Self-Extracting Archive
+      - name: Smoke-test built executable
         run: |
           Set-Location -Path $env:REPO_ROOT
-          $installPath = $env:INSTALL_DIR
           Write-Host "PWD=$(Get-Location)"
-          Write-Host "PATH=$env:Path"
           Write-Host "REPO_ROOT=$env:REPO_ROOT"
           Write-Host "DIST_DIR=$env:DIST_DIR"
           Write-Host "APP_DIR=$env:APP_DIR"
-          Write-Host "INSTALL_DIR=$env:INSTALL_DIR"
-          Write-Host "INSTALLER_EXE=$env:INSTALLER_EXE"
           Write-Host "SCREENSHOT_PATH=$env:SCREENSHOT_PATH"
-          Write-Host "7z.exe exists: $(Test-Path -Path 'C:\Program Files\7-Zip\7z.exe')"
-          Write-Host "7z.sfx exists: $(Test-Path -Path 'C:\Program Files\7-Zip\7z.sfx')"
-          Get-Command "C:\Program Files\7-Zip\7z.exe" | Format-List *
-          if (Test-Path -Path $env:DIST_DIR) {
-            Write-Host "dist tree (top):"
-            Get-ChildItem -Path $env:DIST_DIR -Force | Format-Table -AutoSize
-          }
-          if (Test-Path -Path $env:APP_DIR) {
-            Write-Host "dist\\NAPVIEW tree (top):"
-            Get-ChildItem -Path $env:APP_DIR -Force | Format-Table -AutoSize
-          }
-          $config = @"
-          ;!@Install@!UTF-8!
-          Title="NAPVIEW Installer"
-          InstallPath="$installPath"
-          Progress="no"
-          ;!@InstallEnd@!
-          "@
-          $config | Set-Content -Path sfx_config.txt -Encoding Ascii
-          Write-Host "SFX InstallPath=$installPath"
-          Get-Content -Path sfx_config.txt | ForEach-Object { Write-Host $_ }
-          Write-Host "sfx_config.txt bytes (first 64):"
-          $bytes = Get-Content -Path sfx_config.txt -Encoding Byte -TotalCount 64
-          $bytes | ForEach-Object { Write-Host ("0x{0:X2}" -f $_) }
-          if (-not (Test-Path -Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip not found at C:\Program Files\7-Zip\7z.exe" }
-          if (-not (Test-Path -Path "C:\Program Files\7-Zip\7z.sfx")) { throw "7-Zip SFX module not found at C:\Program Files\7-Zip\7z.sfx" }
           if (-not (Test-Path -Path $env:APP_DIR)) { throw "Expected app directory not found: $env:APP_DIR" }
-          Set-Location -Path $env:DIST_DIR
-          Write-Host "Creating NAPVIEW_archive.7z from $env:DIST_DIR"
-          & "C:\Program Files\7-Zip\7z.exe" a ..\NAPVIEW_archive.7z .\NAPVIEW\*
-          Set-Location -Path $env:REPO_ROOT
-          Write-Host "Listing NAPVIEW_archive.7z"
-          & "C:\Program Files\7-Zip\7z.exe" l .\NAPVIEW_archive.7z
-          cmd.exe /c copy /b "C:\Program Files\7-Zip\7z.sfx"+sfx_config.txt+NAPVIEW_archive.7z "%INSTALLER_EXE%"
-          if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not created at $env:INSTALLER_EXE" }
-          Get-Item -Path $env:INSTALLER_EXE | Format-List *
-
-      - name: Install and smoke-test installer
-        run: |
-          Set-Location -Path $env:REPO_ROOT
-          Write-Host "PWD=$(Get-Location)"
-          Write-Host "INSTALLER_EXE=$env:INSTALLER_EXE"
-          Write-Host "INSTALL_DIR=$env:INSTALL_DIR"
-          if (Test-Path -Path $env:REPO_ROOT) {
-            Write-Host "Repo root contents:"
-            Get-ChildItem -Path $env:REPO_ROOT -Force | Format-Table -AutoSize
-          }
-          if (-not (Test-Path -Path $env:INSTALLER_EXE)) { throw "Installer not found at $env:INSTALLER_EXE" }
-          Write-Host "Running installer: $env:INSTALLER_EXE /S /D=$env:INSTALL_DIR"
-          $proc = Start-Process -FilePath $env:INSTALLER_EXE -ArgumentList "/S", "/D=$env:INSTALL_DIR" -PassThru
-          $finished = $true
-          try {
-            Wait-Process -Id $proc.Id -Timeout 600 -ErrorAction Stop
-          } catch {
-            $finished = $false
-          }
-          if (-not $finished) {
-            Write-Host "Installer did not exit within 180 seconds. Killing PID $($proc.Id)."
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            throw "Installer timed out after 600 seconds"
-          }
-          $proc.Refresh()
-          Write-Host "Installer exit code=$($proc.ExitCode)"
-          if ($proc.ExitCode -ne 0) { throw "Installer failed with exit code $($proc.ExitCode)" }
-          Write-Host "Latest directories in repo root:"
-          Get-ChildItem -Path $env:REPO_ROOT -Directory -Force | Sort-Object LastWriteTime -Descending | Select-Object -First 10 | Format-Table -AutoSize
-          if (Test-Path -Path $env:INSTALL_DIR) {
-            Write-Host "Install dir tree (top):"
-            Get-ChildItem -Path $env:INSTALL_DIR -Force | Format-Table -AutoSize
-            if (Test-Path -Path (Join-Path $env:INSTALL_DIR "NAPVIEW")) {
-              Write-Host "Install dir\\NAPVIEW tree (top):"
-              Get-ChildItem -Path (Join-Path $env:INSTALL_DIR "NAPVIEW") -Force | Format-Table -AutoSize
-            }
-          } else {
-            Write-Host "Searching for NAPVIEW.exe under repo root:"
-            Get-ChildItem -Path $env:REPO_ROOT -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
-            if ($env:TEMP) {
-              Write-Host "Searching for NAPVIEW.exe under TEMP=$env:TEMP"
-              Get-ChildItem -Path $env:TEMP -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
-            }
-            if ($env:TMP -and ($env:TMP -ne $env:TEMP)) {
-              Write-Host "Searching for NAPVIEW.exe under TMP=$env:TMP"
-              Get-ChildItem -Path $env:TMP -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
-            }
-            throw "Install directory not found at $env:INSTALL_DIR"
-          }
-          Write-Host "Install dir tree (full):"
-          Get-ChildItem -Path $env:INSTALL_DIR -Recurse -Force | Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize
-          $foundExe = Get-ChildItem -Path $env:INSTALL_DIR -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $foundExe) { throw "Installed executable not found under $env:INSTALL_DIR" }
+          Write-Host "App directory contents:"
+          Get-ChildItem -Path $env:APP_DIR -Force | Format-Table -AutoSize
+          $foundExe = Get-ChildItem -Path $env:APP_DIR -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $foundExe) { throw "Built executable not found under $env:APP_DIR" }
           $exePath = $foundExe.FullName
-          Write-Host "Launching installed exe: $exePath"
+          Write-Host "Launching built exe: $exePath"
           $proc = Start-Process -FilePath $exePath -PassThru
           Start-Sleep -Seconds 10
           Add-Type -AssemblyName System.Windows.Forms
@@ -238,14 +142,8 @@ jobs:
           $bitmap.Dispose()
           Stop-Process -Id $proc.Id -Force
 
-      - name: Upload installer artifact
+      - name: Upload smoke-test screenshot
         uses: actions/upload-artifact@v4
         with:
-          name: napview-installer
-          path: ${{ github.workspace }}\NAPVIEW_installer.exe
-
-      - name: Upload installer screenshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: napview-installer-screenshot
+          name: napview-smoke-screenshot
           path: ${{ github.workspace }}\napview_installer_smoke.png
