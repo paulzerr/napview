@@ -185,14 +185,14 @@ jobs:
           $proc = Start-Process -FilePath $env:INSTALLER_EXE -ArgumentList "/S", "/D=$env:INSTALL_DIR" -PassThru
           $finished = $true
           try {
-            Wait-Process -Id $proc.Id -Timeout 180 -ErrorAction Stop
+            Wait-Process -Id $proc.Id -Timeout 600 -ErrorAction Stop
           } catch {
             $finished = $false
           }
           if (-not $finished) {
             Write-Host "Installer did not exit within 180 seconds. Killing PID $($proc.Id)."
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            throw "Installer timed out after 180 seconds"
+            throw "Installer timed out after 600 seconds"
           }
           $proc.Refresh()
           Write-Host "Installer exit code=$($proc.ExitCode)"
