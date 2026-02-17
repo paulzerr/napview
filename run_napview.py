@@ -11,6 +11,7 @@ elif getattr(sys, "frozen", False):
     RESOURCE_ROOT = pathlib.Path(sys.executable).resolve().parent / "napview"
 else:
     RESOURCE_ROOT = pathlib.Path(__file__).resolve().parent / "napview"
+    
 LSL_LIB_BY_PLATFORM = {
     "linux": "libs/liblsl.so",
     "darwin": "libs/liblsl.dylib",
