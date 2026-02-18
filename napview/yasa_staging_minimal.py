@@ -3,15 +3,12 @@
 import os
 import mne
 import glob
-import joblib
 import logging
 import numpy as np
 import pandas as pd
-import antropy as ant
 import scipy.signal as sp_sig
 import scipy.stats as sp_stats
 from mne.filter import filter_data
-from sklearn.preprocessing import robust_scale
 from scipy.integrate import simpson
 
 logger = logging.getLogger("yasa")
@@ -574,6 +571,9 @@ class SleepStaging:
         -------
         self : returns an instance of self.
         """
+        import antropy as ant
+        from sklearn.preprocessing import robust_scale
+
         #######################################################################
         # MAIN PARAMETERS
         #######################################################################
@@ -739,6 +739,8 @@ class SleepStaging:
 
     def _load_model(self, path_to_model):
         """Load the relevant trained classifier."""
+        import joblib
+
         if path_to_model == "auto":
             from pathlib import Path
 
