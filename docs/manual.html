@@ -41,7 +41,7 @@
             <h3>Option 1: Self-extracting Windows installer</h3>
             <p>The easiest way to use napview on Windows is to download the portable self-extracting installer.</p>
             <p><a href="https://github.com/paulzerr/napview/releases/latest/download/NAPVIEW_installer.exe">Download napview (Windows)</a></p>
-            <p><strong>Note:</strong> due to the restrictive environment of Windows, you may see a "Search on app store" popup window. Click "No". You may also see the blue Smartscreen warning. In that case click "More info" and then "run anyway". You can also right-click <code>run_napview.exe</code>, go to Properties and tick the box "Unblock". Should this fail, try installing via pip (see below).</p>    
+            <p><strong>Note:</strong> due to the restrictive environment of Windows, you may see a "Search on app store" popup window. Click "No". You may also see the blue Smartscreen warning. In that case click "More info" and then "run anyway". You can also right-click <code>NAPVIEW.exe</code>, go to Properties and tick the box "Unblock". Should this fail, try installing via pip (see below).</p>    
             <br>
             <h3>Option 2: Install from source</h3>
             <p>Python 3.11 is recommended.</p>
@@ -57,7 +57,7 @@ python3 -m venv napview_venv
 source napview_venv/bin/activate
 pip install -r requirements.txt</code></pre>
             <p><strong>Launch NAPVIEW:</strong></p>
-            <pre><code>python run_napview.py</code></pre>
+            <pre><code>napview</code></pre>
             <p><strong>Note:</strong> on first run, NAPVIEW may download model weights via the NIDRA backend.</p>
         </section>
 
@@ -67,7 +67,7 @@ pip install -r requirements.txt</code></pre>
 
             <h2>Walkthrough</h2>
             <h3>Step 1: Start NAPVIEW</h3>
-            <p>Start <code>run_napview.exe</code> or run <code>python run_napview.py</code> in a terminal or command prompt. A browser window opens with the control panel.</p>
+            <p>Start <code>NAPVIEW.exe</code> or run <code>napview</code> in a terminal or command prompt. A browser window opens with the control panel.</p>
 
             <h3>Step 2: Set data directory and record name</h3>
             <p>Use the Data directory selector to choose where session files and outputs are stored. The default location is your user data directory under <code>napview/data</code>.</p>

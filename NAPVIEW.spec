@@ -24,7 +24,7 @@ final_hiddenimports = [
 ] + collect_submodules("scipy") + collect_submodules("pandas") + mne_hiddenimports
 
 a = Analysis(
-    ["run_napview.py"],
+    ["napview/napview.py"],
     pathex=[".", "napview", "nidra/nidra"],
     binaries=vc_redist_binaries + lsl_binaries,
     datas=final_datas,

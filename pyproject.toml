@@ -15,6 +15,9 @@ classifiers = [
 ]
 dynamic = ["dependencies"]
 
+[project.scripts]
+napview = "napview.napview:main"
+
 [tool.setuptools]
 packages = { find = { include = ["napview*"] } }
 
