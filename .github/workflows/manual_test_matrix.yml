@@ -38,7 +38,7 @@ jobs:
           artifacts_dir.mkdir(exist_ok=True)
 
           os_name = os.environ["RUNNER_OS"]
-          py_ver = os.environ["PYTHON_VERSION"]
+          py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
           stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
           stem = f"{os_name}_py{py_ver}_{stamp}"
 

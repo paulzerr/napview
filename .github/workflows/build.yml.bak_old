@@ -2,6 +2,8 @@ name: NAPVIEW Build
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
 
@@ -91,11 +93,6 @@ jobs:
         with:
           name: NAPVIEW-windows-installer
           path: NAPVIEW_installer.exe
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: NAPVIEW_installer.exe
 
   publish-testpypi:
     name: Publish package to TestPyPI
