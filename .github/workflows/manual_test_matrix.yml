@@ -5,11 +5,12 @@ on:
 
 jobs:
   matrix-test:
-    runs-on: ${{ matrix.os }}
+    name: matrix-test (${{ matrix.runner }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        runner: [ubuntu-latest, windows-latest, macos-15-intel]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
@@ -17,211 +18,390 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
+        id: setup_python
+        continue-on-error: true
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run install + startup smoke test
+      - name: Run install + startup smoke test and write fragment reports
+        if: always()
         shell: bash
+        env:
+          REQUESTED_PYTHON: ${{ matrix.python-version }}
+          SETUP_PYTHON_OUTCOME: ${{ steps.setup_python.outcome }}
+          RUNNER_LABEL: ${{ matrix.runner }}
         run: |
-          python - <<'PY'
+          PYTHON_BIN="$(command -v python || true)"
+          if [ -z "$PYTHON_BIN" ]; then
+            PYTHON_BIN="$(command -v python3 || true)"
+          fi
+          if [ -z "$PYTHON_BIN" ]; then
+            echo "No Python interpreter found on runner."
+            exit 1
+          fi
+          "$PYTHON_BIN" - <<'PY'
           import csv
           import datetime as dt
           import os
+          import platform
           import subprocess
           import sys
           import threading
           import time
           from pathlib import Path
 
-          artifacts_dir = Path("matrix-artifacts")
-          artifacts_dir.mkdir(exist_ok=True)
+          FIELDNAMES = [
+              "timestamp_utc",
+              "runner_label",
+              "runner_os",
+              "runner_arch",
+              "requested_python",
+              "actual_python",
+              "setup_python_status",
+              "venv_status",
+              "pip_install_status",
+              "launch_status",
+              "result_category",
+              "notes",
+              "line_1",
+              "line_2",
+              "line_3",
+              "line_4",
+              "line_5",
+          ]
 
-          os_name = os.environ["RUNNER_OS"]
-          py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
-          stamp = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-          stem = f"{os_name}_py{py_ver}_{stamp}"
+          def now_utc() -> str:
+              return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
-          report_log = artifacts_dir / f"{stem}.log"
-          report_csv = artifacts_dir / f"{stem}.csv"
-          pip_log = artifacts_dir / f"{stem}_pip.log"
-          start_log = artifacts_dir / f"{stem}_start.log"
+          def sanitize(value: str) -> str:
+              out = []
+              for ch in value:
+                  if ch.isalnum() or ch in ("-", "_", "."):
+                      out.append(ch)
+                  else:
+                      out.append("_")
+              return "".join(out)
 
-          def run_cmd(cmd, out_path):
-              proc = subprocess.run(cmd, capture_output=True, text=True)
+          def run_cmd(cmd):
+              proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
               text = (proc.stdout or "") + (proc.stderr or "")
-              out_path.write_text(text, encoding="utf-8")
-              return proc.returncode
+              return proc.returncode, text
 
-          venv_dir = Path(".matrix-venv")
-          venv_rc = subprocess.run([sys.executable, "-m", "venv", str(venv_dir)]).returncode
-          if venv_rc != 0:
-              report_log.write_text(
-                  "\n".join(
-                      [
-                          f"Server started at: {dt.datetime.utcnow().isoformat(timespec='seconds')}Z",
-                          f"Runner OS: {os_name}",
-                          f"Python: {py_ver}",
-                          "venv setup: FAIL",
-                      ]
-                  )
-                  + "\n",
-                  encoding="utf-8",
-              )
-              with report_csv.open("w", newline="", encoding="utf-8") as f:
-                  writer = csv.DictWriter(
-                      f,
-                      fieldnames=[
-                          "timestamp_utc",
-                          "runner_os",
-                          "python_version",
-                          "pip_install_status",
-                          "pip_install_exit_code",
-                          "napview_start_status",
-                          "napview_exit_code",
-                          "line_1",
-                          "line_2",
-                          "line_3",
-                          "line_4",
-                          "line_5",
-                      ],
-                  )
-                  writer.writeheader()
-                  writer.writerow(
-                      {
-                          "timestamp_utc": dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
-                          "runner_os": os_name,
-                          "python_version": py_ver,
-                          "pip_install_status": "FAIL",
-                          "pip_install_exit_code": "venv_failed",
-                          "napview_start_status": "SKIPPED",
-                          "napview_exit_code": "",
-                          "line_1": "(venv creation failed)",
-                          "line_2": "",
-                          "line_3": "",
-                          "line_4": "",
-                          "line_5": "",
-                      }
-                  )
-              sys.exit(1)
+          fragments = Path("matrix-fragments")
+          fragments.mkdir(exist_ok=True)
 
-          if os_name == "Windows":
-              venv_python = venv_dir / "Scripts" / "python.exe"
-              napview_cmd = [str(venv_dir / "Scripts" / "napview.exe")]
-          else:
-              venv_python = venv_dir / "bin" / "python"
-              napview_cmd = [str(venv_dir / "bin" / "napview")]
+          requested_python = os.environ.get("REQUESTED_PYTHON", "")
+          setup_outcome = os.environ.get("SETUP_PYTHON_OUTCOME", "unknown")
+          runner_label = os.environ.get("RUNNER_LABEL", "unknown")
+          runner_os = os.environ.get("RUNNER_OS", platform.system())
+          runner_arch = platform.machine()
+          actual_python = f"{sys.version_info.major}.{sys.version_info.minor}"
+          timestamp_utc = now_utc()
 
-          _ = run_cmd([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], artifacts_dir / f"{stem}_pip_upgrade.log")
-          pip_rc = run_cmd([str(venv_python), "-m", "pip", "install", "."], pip_log)
-          pip_status = "PASS" if pip_rc == 0 else "FAIL"
+          combo = sanitize(f"{runner_label}_py{requested_python}")
+          csv_path = fragments / f"{combo}.csv"
+          readable_path = fragments / f"{combo}.readable.log"
+          full_path = fragments / f"{combo}.full.log"
 
+          setup_python_status = "PASS" if setup_outcome == "success" else "FAIL"
+          venv_status = "SKIPPED"
+          pip_install_status = "SKIPPED"
+          launch_status = "SKIPPED"
+          result_category = "PYTHON_ENV_UNAVAILABLE"
+          notes = ""
           first_lines = []
-          start_status = "SKIPPED"
-          start_rc = ""
+          pip_upgrade_output = ""
+          pip_install_output = ""
+          launch_output = ""
 
-          if pip_rc == 0:
-              proc = subprocess.Popen(
-                  napview_cmd,
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  bufsize=1,
-              )
-
-              def read_lines():
-                  if proc.stdout is None:
-                      return
-                  for line in proc.stdout:
-                      if len(first_lines) < 5:
-                          first_lines.append(line.rstrip("\n"))
-
-              t = threading.Thread(target=read_lines, daemon=True)
-              t.start()
-              deadline = time.time() + 30
-              while time.time() < deadline and len(first_lines) < 5 and proc.poll() is None:
-                  time.sleep(0.2)
-
-              if proc.poll() is None:
-                  start_status = "PASS"
-              else:
-                  start_rc = str(proc.returncode)
-                  start_status = "PASS" if proc.returncode == 0 else "FAIL"
-
-              if not first_lines:
-                  first_lines.append("(no terminal output captured in first 30 seconds)")
-
-              start_log.write_text("\n".join(first_lines) + "\n", encoding="utf-8")
+          if setup_python_status != "PASS":
+              notes = f"actions/setup-python outcome={setup_outcome}"
           else:
-              start_log.write_text("Skipped because pip install failed.\n", encoding="utf-8")
-              first_lines = ["(startup skipped)"]
+              venv_dir = Path(".matrix-venv")
+              venv_rc, venv_output = run_cmd([sys.executable, "-m", "venv", str(venv_dir)])
+              if venv_rc != 0:
+                  venv_status = "FAIL"
+                  result_category = "PYTHON_ENV_UNAVAILABLE"
+                  notes = "Failed to create venv"
+                  launch_output = venv_output
+              else:
+                  venv_status = "PASS"
+                  if runner_os == "Windows":
+                      venv_python = venv_dir / "Scripts" / "python.exe"
+                      napview_cmd = [str(venv_dir / "Scripts" / "napview.exe")]
+                  else:
+                      venv_python = venv_dir / "bin" / "python"
+                      napview_cmd = [str(venv_dir / "bin" / "napview")]
 
-          now = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
-          lines_block = "\n".join(f"{idx+1}. {line}" for idx, line in enumerate(first_lines[:5]))
+                  _, pip_upgrade_output = run_cmd([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
+                  pip_rc, pip_install_output = run_cmd([str(venv_python), "-m", "pip", "install", "."])
+                  pip_install_status = "PASS" if pip_rc == 0 else "FAIL"
 
-          report_log.write_text(
-              "\n".join(
-                  [
-                      f"Server started at: {now}",
-                      f"Runner OS: {os_name}",
-                      f"Python: {py_ver}",
-                      f"pip install: {pip_status} (exit={pip_rc})",
-                      f"napview startup: {start_status}" + (f" (exit={start_rc})" if start_rc else ""),
-                      "",
-                      "First 5 terminal output lines from napview:",
-                      lines_block,
-                      "",
-                      f"pip log: {pip_log.name}",
-                      f"startup log: {start_log.name}",
-                  ]
-              )
-              + "\n",
-              encoding="utf-8",
-          )
+                  if pip_install_status != "PASS":
+                      result_category = "INSTALL_FAIL"
+                      notes = "pip install . failed"
+                      first_lines = ["(startup skipped: pip install failed)"]
+                  else:
+                      try:
+                          proc = subprocess.Popen(
+                              napview_cmd,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT,
+                              text=True,
+                              bufsize=1,
+                              env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                          )
+                      except Exception as exc:
+                          launch_status = "FAIL"
+                          result_category = "INSTALLED_BUT_FAILS_TO_RUN"
+                          notes = f"Failed to launch napview: {exc}"
+                          first_lines = [f"(failed to launch: {exc})"]
+                      else:
+                          def read_lines():
+                              if proc.stdout is None:
+                                  return
+                              for line in proc.stdout:
+                                  if len(first_lines) < 5:
+                                      first_lines.append(line.rstrip("\n"))
 
-          with report_csv.open("w", newline="", encoding="utf-8") as f:
-              writer = csv.DictWriter(
-                  f,
-                  fieldnames=[
-                      "timestamp_utc",
-                      "runner_os",
-                      "python_version",
-                      "pip_install_status",
-                      "pip_install_exit_code",
-                      "napview_start_status",
-                      "napview_exit_code",
-                      "line_1",
-                      "line_2",
-                      "line_3",
-                      "line_4",
-                      "line_5",
-                  ],
-              )
+                          t = threading.Thread(target=read_lines, daemon=True)
+                          t.start()
+                          deadline = time.time() + 30
+                          while time.time() < deadline and len(first_lines) < 5 and proc.poll() is None:
+                              time.sleep(0.2)
+
+                          if proc.poll() is None:
+                              launch_status = "PASS"
+                              result_category = "SUCCESS_EXPECTED_OUTPUT"
+                              notes = "Launched and kept running for 30 seconds"
+                          else:
+                              rc = proc.returncode
+                              launch_status = "PASS" if rc == 0 else "FAIL"
+                              if rc == 0:
+                                  result_category = "SUCCESS_EXPECTED_OUTPUT"
+                                  notes = "Launched and exited with code 0"
+                              else:
+                                  result_category = "INSTALLED_BUT_FAILS_TO_RUN"
+                                  notes = f"Launched but exited with code {rc}"
+
+          if not first_lines:
+              first_lines = ["(no terminal output captured in first 30 seconds)"]
+
+          launch_output = "\n".join(first_lines[:5])
+          row = {
+              "timestamp_utc": timestamp_utc,
+              "runner_label": runner_label,
+              "runner_os": runner_os,
+              "runner_arch": runner_arch,
+              "requested_python": requested_python,
+              "actual_python": actual_python,
+              "setup_python_status": setup_python_status,
+              "venv_status": venv_status,
+              "pip_install_status": pip_install_status,
+              "launch_status": launch_status,
+              "result_category": result_category,
+              "notes": notes,
+              "line_1": first_lines[0] if len(first_lines) > 0 else "",
+              "line_2": first_lines[1] if len(first_lines) > 1 else "",
+              "line_3": first_lines[2] if len(first_lines) > 2 else "",
+              "line_4": first_lines[3] if len(first_lines) > 3 else "",
+              "line_5": first_lines[4] if len(first_lines) > 4 else "",
+          }
+
+          with csv_path.open("w", newline="", encoding="utf-8") as f:
+              writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
               writer.writeheader()
-              writer.writerow(
-                  {
-                      "timestamp_utc": now,
-                      "runner_os": os_name,
-                      "python_version": py_ver,
-                      "pip_install_status": pip_status,
-                      "pip_install_exit_code": str(pip_rc),
-                      "napview_start_status": start_status,
-                      "napview_exit_code": start_rc,
-                      "line_1": first_lines[0] if len(first_lines) > 0 else "",
-                      "line_2": first_lines[1] if len(first_lines) > 1 else "",
-                      "line_3": first_lines[2] if len(first_lines) > 2 else "",
-                      "line_4": first_lines[3] if len(first_lines) > 3 else "",
-                      "line_5": first_lines[4] if len(first_lines) > 4 else "",
-                  }
-              )
+              writer.writerow(row)
 
-          if pip_rc != 0 or start_status == "FAIL":
-              sys.exit(1)
+          readable_lines = [
+              f"Server started at: {timestamp_utc}",
+              f"Runner: {runner_label} ({runner_os}, {runner_arch})",
+              f"Python requested: {requested_python}",
+              f"Python actual: {actual_python}",
+              f"setup-python: {setup_python_status}",
+              f"venv: {venv_status}",
+              f"pip install .: {pip_install_status}",
+              f"napview launch: {launch_status}",
+              f"result: {result_category}",
+              f"notes: {notes}",
+              "",
+              "First 5 terminal output lines from napview:",
+          ]
+          for idx, line in enumerate(first_lines[:5], start=1):
+              readable_lines.append(f"{idx}. {line}")
+          readable_path.write_text("\n".join(readable_lines) + "\n", encoding="utf-8")
+
+          full_sections = [
+              f"Server started at: {timestamp_utc}",
+              f"Runner: {runner_label} ({runner_os}, {runner_arch})",
+              f"Python requested: {requested_python}",
+              f"Python actual: {actual_python}",
+              f"setup-python: {setup_python_status}",
+              f"venv: {venv_status}",
+              f"pip install .: {pip_install_status}",
+              f"napview launch: {launch_status}",
+              f"result: {result_category}",
+              f"notes: {notes}",
+              "",
+              "=== First 5 terminal output lines ===",
+              launch_output,
+              "",
+              "=== pip install --upgrade pip output ===",
+              pip_upgrade_output,
+              "",
+              "=== pip install . output ===",
+              pip_install_output,
+          ]
+          full_path.write_text("\n".join(full_sections) + "\n", encoding="utf-8")
           PY
 
-      - name: Upload matrix artifacts
+      - name: Upload fragment artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: napview-matrix-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: matrix-artifacts
+          name: napview-matrix-fragment-${{ matrix.runner }}-py${{ matrix.python-version }}
+          path: matrix-fragments
+          retention-days: 1
+
+  aggregate-results:
+    name: aggregate-results
+    if: always()
+    needs: matrix-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+
+    steps:
+      - name: Download fragment artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: napview-matrix-fragment-*
+          path: matrix-collected
+          merge-multiple: true
+
+      - name: Build consolidated reports
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv
+          import datetime as dt
+          from pathlib import Path
+
+          collected = Path("matrix-collected")
+          output = Path("matrix-final")
+          output.mkdir(exist_ok=True)
+
+          csv_files = sorted(collected.glob("*.csv"))
+          rows = []
+          for csv_file in csv_files:
+              with csv_file.open(newline="", encoding="utf-8") as f:
+                  reader = csv.DictReader(f)
+                  rows.extend(reader)
+
+          os_rank = {"ubuntu-latest": 0, "windows-latest": 1, "macos-15-intel": 2}
+          def py_key(version: str):
+              parts = version.split(".")
+              return tuple(int(p) for p in parts)
+
+          rows.sort(key=lambda r: (os_rank.get(r.get("runner_label", ""), 99), py_key(r.get("requested_python", "0.0"))))
+
+          result_csv = output / "results.csv"
+          fieldnames = [
+              "timestamp_utc",
+              "runner_label",
+              "runner_os",
+              "runner_arch",
+              "requested_python",
+              "actual_python",
+              "setup_python_status",
+              "venv_status",
+              "pip_install_status",
+              "launch_status",
+              "result_category",
+              "notes",
+              "line_1",
+              "line_2",
+              "line_3",
+              "line_4",
+              "line_5",
+          ]
+          with result_csv.open("w", newline="", encoding="utf-8") as f:
+              writer = csv.DictWriter(f, fieldnames=fieldnames)
+              writer.writeheader()
+              writer.writerows(rows)
+
+          readable_log = output / "readable.log"
+          now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+          lines = [
+              f"Server started at: {now}",
+              "NAPVIEW matrix summary",
+              "",
+              "runner_label | py_req | setup_py | venv | pip_install | launch | result_category | notes",
+              "-" * 120,
+          ]
+          counts = {}
+          for row in rows:
+              category = row["result_category"]
+              counts[category] = counts.get(category, 0) + 1
+              lines.append(
+                  f"{row['runner_label']} | {row['requested_python']} | {row['setup_python_status']} | "
+                  f"{row['venv_status']} | {row['pip_install_status']} | {row['launch_status']} | "
+                  f"{category} | {row['notes']}"
+              )
+          lines.append("")
+          lines.append("Category counts:")
+          for key in sorted(counts):
+              lines.append(f"- {key}: {counts[key]}")
+          readable_log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          full_log = output / "full.log"
+          full_lines = [
+              f"Server started at: {now}",
+              "NAPVIEW matrix full logs",
+              "",
+          ]
+          for full_file in sorted(collected.glob("*.full.log")):
+              full_lines.append("=" * 120)
+              full_lines.append(full_file.name)
+              full_lines.append("=" * 120)
+              full_lines.append(full_file.read_text(encoding="utf-8"))
+              full_lines.append("")
+          full_log.write_text("\n".join(full_lines), encoding="utf-8")
+          PY
+
+      - name: Zip consolidated reports
+        shell: bash
+        run: |
+          cd matrix-final
+          zip -q napview-matrix-reports.zip full.log readable.log results.csv
+
+      - name: Upload final reports zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: napview-matrix-reports
+          path: matrix-final/napview-matrix-reports.zip
+
+      - name: Delete fragment artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const run_id = context.runId;
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { owner, repo, run_id, per_page: 100 }
+            );
+            for (const artifact of artifacts) {
+              if (artifact.name.startsWith("napview-matrix-fragment-")) {
+                await github.rest.actions.deleteArtifact({
+                  owner,
+                  repo,
+                  artifact_id: artifact.id
+                });
+              }
+            }

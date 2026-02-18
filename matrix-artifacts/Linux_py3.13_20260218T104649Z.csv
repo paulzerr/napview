@@ -1,0 +1,2 @@
+timestamp_utc,runner_os,python_version,pip_install_status,pip_install_exit_code,napview_start_status,napview_exit_code,line_1,line_2,line_3,line_4,line_5
+2026-02-18T10:46:49Z,Linux,3.13,FAIL,1,SKIPPED,,(startup skipped: pip install failed),,,,
