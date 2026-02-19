@@ -1,0 +1,256 @@
+name: Windows Python Package Debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-python-package-debug:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    env:
+      REPO_ROOT: ${{ github.workspace }}
+      ARTIFACT_DIR: ${{ github.workspace }}\python-package-debug-artifacts
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          python -m pip install --upgrade pip "setuptools<70.0.0"
+          pip install .
+          pip install playwright
+
+      - name: Install Playwright browser
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          python -m playwright install chromium
+
+      - name: Run python-package scenario and collect diagnostics
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
+
+          $py = @'
+          import json
+          import os
+          import re
+          import shutil
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+          from urllib.request import urlretrieve
+
+          from appdirs import user_data_dir
+          from playwright.sync_api import sync_playwright
+
+          artifact_dir = Path(os.environ["ARTIFACT_DIR"])
+          artifact_dir.mkdir(parents=True, exist_ok=True)
+          server_log_path = artifact_dir / "napview_server.log"
+          session_log_copy_path = artifact_dir / "napview_session.log"
+          screenshot_path = artifact_dir / "gui_after_start.png"
+          metadata_path = artifact_dir / "metadata.json"
+
+          metadata = {
+              "status": "UNKNOWN",
+              "error": "",
+              "python_version": sys.version,
+              "models_dir": "",
+              "models": {},
+              "url": "",
+              "start_payload": {},
+              "session_log_path": "",
+              "checks": {},
+          }
+
+          proc = None
+          log_file = None
+          page = None
+
+          try:
+              models_dir = Path(user_data_dir()) / "NIDRA" / "models"
+              models_dir.mkdir(parents=True, exist_ok=True)
+              metadata["models_dir"] = str(models_dir)
+
+              base_url = "https://huggingface.co/pzerr/NIDRA_models/resolve/main"
+              model_files = [
+                  "ez6.onnx",
+                  "ez6moe.onnx",
+                  "u-sleep-nsrr-2024.onnx",
+                  "u-sleep-nsrr-2024_eeg.onnx",
+              ]
+              for name in model_files:
+                  target = models_dir / name
+                  if not target.exists():
+                      urlretrieve(f"{base_url}/{name}", target)
+                  metadata["models"][name] = target.stat().st_size
+
+              log_file = server_log_path.open("w", encoding="utf-8")
+              child_env = os.environ.copy()
+              child_env["NAPVIEW_NO_AUTO_BROWSER"] = "1"
+              child_env["PYTHONUNBUFFERED"] = "1"
+              proc = subprocess.Popen(
+                  [sys.executable, "-m", "napview.napview"],
+                  stdout=log_file,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  env=child_env,
+              )
+
+              deadline = time.time() + 240
+              url = ""
+              while time.time() < deadline:
+                  if proc.poll() is not None:
+                      tail = ""
+                      if server_log_path.exists():
+                          tail = server_log_path.read_text(encoding="utf-8", errors="replace")[-3000:]
+                      raise RuntimeError(f"napview exited early with code {proc.returncode}. log tail: {tail}")
+
+                  if server_log_path.exists():
+                      text = server_log_path.read_text(encoding="utf-8", errors="replace")
+                      match = re.search(r"Server started at (http://(?:localhost|127\\.0\\.0\\.1):\\d+)", text)
+                      if match:
+                          url = match.group(1)
+                          break
+
+                  for port in range(8145, 8205):
+                      probe_url = f"http://127.0.0.1:{port}"
+                      try:
+                          with urllib.request.urlopen(probe_url, timeout=1) as response:
+                              if response.status < 500:
+                                  url = probe_url
+                                  break
+                      except (urllib.error.URLError, TimeoutError):
+                          continue
+
+                  if url:
+                      break
+                  time.sleep(1)
+
+              if not url:
+                  raise RuntimeError("Timed out waiting for server URL")
+
+              metadata["url"] = url
+
+              with sync_playwright() as p:
+                  browser = p.chromium.launch(
+                      headless=True,
+                      args=["--no-first-run", "--no-default-browser-check"],
+                  )
+                  page = browser.new_page(viewport={"width": 1280, "height": 720})
+                  response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                  if response is None:
+                      raise RuntimeError("Page.goto returned no response")
+                  if response.status >= 500:
+                      raise RuntimeError(f"Page.goto returned HTTP {response.status}")
+
+                  page.wait_for_selector("body", timeout=15000)
+                  page.wait_for_timeout(5000)
+                  page.wait_for_selector("#startButton:not([disabled])", timeout=60000)
+                  with page.expect_response(
+                      lambda r: r.url.endswith("/start") and r.request.method == "POST",
+                      timeout=120000,
+                  ) as start_response_info:
+                      page.click("#startButton")
+
+                  start_payload = start_response_info.value.json()
+                  metadata["start_payload"] = start_payload
+                  if start_payload.get("status") != "success":
+                      raise RuntimeError(f"/start failed: {start_payload}")
+
+                  page.wait_for_timeout(120000)
+                  page.screenshot(path=str(screenshot_path), full_page=True)
+                  browser.close()
+
+              with urllib.request.urlopen(f"{url}/load_config", timeout=20) as response:
+                  config = json.loads(response.read().decode("utf-8", errors="replace"))
+
+              base_path = config.get("base_path")
+              log_file_name = config.get("log_file_name")
+              if base_path:
+                  metadata["config_base_path"] = base_path
+                  base_path_dir = Path(base_path)
+                  if base_path_dir.exists():
+                      shutil.copytree(base_path_dir, artifact_dir / "napview-data", dirs_exist_ok=True)
+
+              if base_path and log_file_name:
+                  session_log_source_path = Path(base_path) / log_file_name
+                  metadata["session_log_path"] = str(session_log_source_path)
+                  session_deadline = time.time() + 60
+                  while time.time() < session_deadline and not session_log_source_path.exists():
+                      time.sleep(1)
+                  if session_log_source_path.exists():
+                      session_log_copy_path.write_bytes(session_log_source_path.read_bytes())
+
+              log_file.flush()
+              terminal_text = server_log_path.read_text(encoding="utf-8", errors="replace").lower()
+              session_text = (
+                  session_log_copy_path.read_text(encoding="utf-8", errors="replace").lower()
+                  if session_log_copy_path.exists()
+                  else ""
+              )
+
+              combined = terminal_text + "\n" + session_text
+              checks = {
+                  "start_request_seen": "post /start" in terminal_text,
+                  "model_loaded": "model loaded:" in combined,
+                  "no_model_nosuchfile": "no_suchfile" not in combined,
+                  "no_model_load_error": "failed to load onnx model" not in combined,
+                  "analysis_saved": "analysis saved for epoch" in combined,
+              }
+              metadata["checks"] = checks
+
+              failed_checks = [name for name, ok in checks.items() if not ok]
+              if failed_checks:
+                  raise RuntimeError(f"Failed checks: {', '.join(failed_checks)}")
+
+              metadata["status"] = "PASS"
+          except Exception as exc:
+              metadata["status"] = "FAIL"
+              metadata["error"] = str(exc)
+              if page is not None and not screenshot_path.exists():
+                  try:
+                      page.screenshot(path=str(screenshot_path), full_page=True)
+                  except Exception:
+                      pass
+              raise
+          finally:
+              if log_file is not None:
+                  log_file.flush()
+                  log_file.close()
+
+              if proc is not None and proc.poll() is None:
+                  proc.terminate()
+                  try:
+                      proc.wait(timeout=20)
+                  except subprocess.TimeoutExpired:
+                      proc.kill()
+                      proc.wait(timeout=20)
+
+              metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+          '@
+
+          $py = $py -replace '(?m)^ {10}', ''
+          $py | python -
+
+      - name: Upload debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-python-package-debug
+          path: ${{ github.workspace }}\python-package-debug-artifacts
+          if-no-files-found: warn
+          retention-days: 7
