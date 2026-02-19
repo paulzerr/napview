@@ -11,7 +11,7 @@
 <script>
   const DESIGN_WIDTH = 1920;
   const DESIGN_HEIGHT = 1080;
-  const SCALE_MULTIPLIER = 1.2;
+  const SCALE_MULTIPLIER = 1.0;
 
   function updateScale() {
     const baseScale = Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
@@ -24,7 +24,7 @@
 </script>
 <style>
   :root {
-    --scale: 1;
+    --scale: 1.0;
     --base-unit: 16px;
     --base-font: 18px;
     --unit: calc(var(--base-unit) * var(--scale));

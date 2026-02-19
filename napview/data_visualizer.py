@@ -88,9 +88,10 @@ class Visualizer:
     def run(self):
         try:
 
-            def open_browser():
-                webbrowser.open(f"http://127.0.0.1:{self.visualizer_port}", new=2)
-            Timer(1, open_browser).start()
+            if os.environ.get("NAPVIEW_NO_AUTO_BROWSER") != "1":
+                def open_browser():
+                    webbrowser.open(f"http://127.0.0.1:{self.visualizer_port}", new=2)
+                Timer(1, open_browser).start()
             self.app.run(debug=False, port=self.visualizer_port)
 
         except Exception as e:

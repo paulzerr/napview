@@ -645,7 +645,8 @@ def main():
         print(f"Server started at http://localhost:{gui_server_port}")
         logger.info(f"Server started at http://localhost:{gui_server_port}")
         time.sleep(1)
-        webbrowser.open(f"http://localhost:{gui_server_port}", new=1)
+        if os.environ.get("NAPVIEW_NO_AUTO_BROWSER") != "1":
+            webbrowser.open(f"http://localhost:{gui_server_port}", new=1)
         logger.info("GUI: Server starting...")
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Napview V2 Test Matrix</title>
+  <style>
+    :root {
+      --ok-bg: #e8f8ee;
+      --ok-fg: #1f7a3f;
+      --bad-bg: #fdecec;
+      --bad-fg: #a02a2a;
+      --todo-bg: #f4f5f7;
+      --todo-fg: #5b6470;
+      --border: #d9d9d9;
+      --head: #f5f5f5;
+    }
+    body {
+      margin: 24px;
+      font-family: sans-serif;
+      color: #1b1b1b;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+    p {
+      margin: 0 0 16px;
+      color: #444;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      max-width: 1180px;
+      table-layout: fixed;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    thead th {
+      background: var(--head);
+      font-weight: 700;
+    }
+    th.os {
+      text-align: left;
+      width: 340px;
+      background: #fff;
+      font-weight: 600;
+    }
+    th.corner {
+      border: none;
+      background: transparent;
+      padding: 0;
+    }
+    td.ok {
+      background: var(--ok-bg);
+      color: var(--ok-fg);
+      font-weight: 700;
+      font-size: 18px;
+    }
+    td.bad {
+      background: var(--bad-bg);
+      color: var(--bad-fg);
+      font-weight: 700;
+      font-size: 18px;
+    }
+    td.todo {
+      background: var(--todo-bg);
+      color: var(--todo-fg);
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .runner {
+      display: block;
+      margin-top: 2px;
+      color: #666;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .legend {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>Napview V2 Runner Matrix</h1>
+  <p>Current view of planned coverage from <code>exe_matrix_tester_v2.yml</code>. Cells are pending until the next run result is available.</p>
+
+  <table aria-label="Napview support by operating system, browser, and variant">
+    <thead>
+      <tr>
+        <th class="corner" aria-hidden="true"></th>
+        <th colspan="2">Chromium</th>
+        <th colspan="2">Firefox</th>
+      </tr>
+      <tr>
+        <th class="corner" aria-hidden="true"></th>
+        <th>Installer</th>
+        <th>Python Package</th>
+        <th>Installer</th>
+        <th>Python Package</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th class="os" scope="row">Ubuntu 24.04 LTS (x64)<span class="runner">runner: <code>ubuntu-latest</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">Ubuntu 22.04 LTS (x64)<span class="runner">runner: <code>ubuntu-22.04</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">Ubuntu 24.04 LTS (arm64)<span class="runner">runner: <code>ubuntu-24.04-arm</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">Windows 11 / Server 2025 (x64)<span class="runner">runners: <code>windows-latest</code>, <code>windows-2025</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">Windows 11 (arm64)<span class="runner">runner: <code>windows-11-arm</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">macOS 15 (arm64)<span class="runner">runners: <code>macos-latest</code>, <code>macos-15</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">macOS 15 (x64)<span class="runner">runner: <code>macos-15-intel</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">macOS 14 (arm64)<span class="runner">runner: <code>macos-14</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">macOS 13 (x64)<span class="runner">runner: <code>macos-13</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+      <tr>
+        <th class="os" scope="row">macOS 26 (arm64)<span class="runner">runner: <code>macos-26</code></span></th>
+        <td class="todo">?</td><td class="todo">?</td><td class="todo">?</td><td class="todo">?</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="legend">
+    <strong>Legend:</strong> <span style="color:#5b6470">?</span> pending run, <span style="color:#1f7a3f">✓</span> confirmed pass, <span style="color:#a02a2a">✕</span> confirmed fail.
+  </div>
+</body>
+</html>

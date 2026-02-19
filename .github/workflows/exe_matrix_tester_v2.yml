@@ -1,32 +1,38 @@
-name: EXE Matrix Tester
+name: EXE Matrix Tester V2
 
 on:
   workflow_dispatch:
 
 jobs:
   exe-matrix:
-    name: exe-matrix (${{ matrix.runner }}, ${{ matrix.browser }}, ${{ matrix.dll_mode }})
+    name: exe-matrix-v2 (${{ matrix.runner }}, ${{ matrix.browser }}, ${{ matrix.variant }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 70
     strategy:
       fail-fast: false
-      max-parallel: 10
+      max-parallel: 8
       matrix:
         runner:
           - ubuntu-latest
           - ubuntu-22.04
+          - ubuntu-24.04-arm
           - windows-latest
-          - windows-2022
+          - windows-2025
+          - windows-11-arm
+          - macos-latest
+          - macos-15
           - macos-15-intel
           - macos-14
+          - macos-13
+          - macos-26
         browser:
           - chromium
           - firefox
         resolution:
           - 1280x720
-        dll_mode:
-          - bundled
-          - system
+        variant:
+          - installer
+          - python_package
 
     steps:
       - name: Check out repository
@@ -42,19 +48,60 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip "setuptools<70.0.0"
           pip install .
           pip install playwright
 
-      - name: Install browser runtime (Linux)
-        if: runner.os == 'Linux'
+      - name: Install PyInstaller
+        if: matrix.variant == 'installer'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install pyinstaller
+
+      - name: Ensure NIDRA model files
+        if: matrix.variant == 'installer'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import urlretrieve
+
+          model_dir = Path("nidra/nidra/NIDRA/models")
+          model_dir.mkdir(parents=True, exist_ok=True)
+
+          base = "https://huggingface.co/pzerr/NIDRA_models/resolve/main"
+          files = [
+              "ez6.onnx",
+              "ez6moe.onnx",
+              "u-sleep-nsrr-2024.onnx",
+              "u-sleep-nsrr-2024_eeg.onnx",
+          ]
+          for name in files:
+              target = model_dir / name
+              if target.exists():
+                  continue
+              urlretrieve(f"{base}/{name}", target)
+          PY
+
+      - name: Build executable with PyInstaller
+        if: matrix.variant == 'installer'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build dist
+          python -m PyInstaller NAPVIEW.spec
+
+      - name: Install browser runtime (Linux full runner)
+        if: runner.os == 'Linux' && matrix.runner != 'ubuntu-slim'
         shell: bash
         run: |
           set -euo pipefail
           python -m playwright install --with-deps "${{ matrix.browser }}"
 
-      - name: Install browser runtime (non-Linux)
-        if: runner.os != 'Linux'
+      - name: Install browser runtime (non-Linux or ubuntu-slim)
+        if: runner.os != 'Linux' || matrix.runner == 'ubuntu-slim'
         shell: bash
         run: |
           set -euo pipefail
@@ -66,7 +113,7 @@ jobs:
           MATRIX_RUNNER: ${{ matrix.runner }}
           MATRIX_BROWSER: ${{ matrix.browser }}
           MATRIX_RESOLUTION: ${{ matrix.resolution }}
-          MATRIX_DLL_MODE: ${{ matrix.dll_mode }}
+          MATRIX_VARIANT: ${{ matrix.variant }}
           RUNNER_OS: ${{ runner.os }}
           PYTHONUNBUFFERED: "1"
         run: |
@@ -87,7 +134,7 @@ jobs:
           runner = os.environ["MATRIX_RUNNER"]
           browser_name = os.environ["MATRIX_BROWSER"]
           resolution = os.environ["MATRIX_RESOLUTION"]
-          dll_mode = os.environ["MATRIX_DLL_MODE"]
+          variant = os.environ["MATRIX_VARIANT"]
           runner_os = os.environ["RUNNER_OS"]
           width_str, height_str = resolution.split("x")
           width = int(width_str)
@@ -103,18 +150,30 @@ jobs:
           server_log_path = logs_dir / "napview_server.log"
           runner_log_path = logs_dir / "runner.log"
           metadata_path = root / "metadata.json"
-          screenshot_path = shots_dir / f"{runner}__{browser_name}__{resolution}__{dll_mode}.png"
+          screenshot_path = shots_dir / f"{runner}__{browser_name}__{resolution}__{variant}.png"
 
-          start_cmd = [sys.executable, "-m", "napview.napview"]
-          if dll_mode == "system":
-              start_cmd = [sys.executable, "-m", "napview.napview_backend"]
+          if variant == "installer":
+              dist_root = Path("dist") / "NAPVIEW"
+              names = {"NAPVIEW.exe", "NAPVIEW"}
+              candidates = [p for p in dist_root.rglob("*") if p.is_file() and p.name in names]
+              if not candidates:
+                  raise RuntimeError(f"Built executable not found under {dist_root}")
+              if os.name == "nt":
+                  candidates.sort(key=lambda p: (p.suffix.lower() != ".exe", len(p.parts)))
+              else:
+                  candidates.sort(key=lambda p: (p.suffix.lower() == ".exe", len(p.parts)))
+              start_cmd = [str(candidates[0])]
+          elif variant == "python_package":
+              start_cmd = [sys.executable, "-m", "napview.napview"]
+          else:
+              raise RuntimeError(f"Unsupported variant {variant}")
 
           metadata = {
               "runner": runner,
               "runner_os": runner_os,
               "browser": browser_name,
               "resolution": resolution,
-              "dll_mode": dll_mode,
+              "variant": variant,
               "start_cmd": start_cmd,
               "status": "UNKNOWN",
               "url": "",
@@ -125,21 +184,27 @@ jobs:
           log_file = None
           try:
               log_file = server_log_path.open("w", encoding="utf-8")
+              child_env = os.environ.copy()
+              child_env["NAPVIEW_NO_AUTO_BROWSER"] = "1"
               proc = subprocess.Popen(
                   start_cmd,
                   stdout=log_file,
                   stderr=subprocess.STDOUT,
                   text=True,
+                  env=child_env,
               )
 
-              deadline = time.time() + 180
+              deadline = time.time() + 240
               url = ""
               while time.time() < deadline:
                   if proc.poll() is not None:
-                      raise RuntimeError(f"napview exited early with code {proc.returncode}")
+                      tail = ""
+                      if server_log_path.exists():
+                          tail = server_log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+                      raise RuntimeError(f"napview exited early with code {proc.returncode}. log tail: {tail}")
                   if server_log_path.exists():
                       text = server_log_path.read_text(encoding="utf-8", errors="replace")
-                      match = re.search(r"Server started at (http://localhost:\d+)", text)
+                      match = re.search(r"Server started at (http://(?:localhost|127\\.0\\.0\\.1):\\d+)", text)
                       if match:
                           url = match.group(1)
                           break
@@ -163,22 +228,33 @@ jobs:
 
               with sync_playwright() as p:
                   if browser_name == "chromium":
-                      browser = p.chromium.launch(headless=True)
-                  elif browser_name == "firefox":
-                      browser = p.firefox.launch(headless=True)
-                  elif browser_name == "webkit":
-                      browser = p.webkit.launch(headless=True)
-                  elif browser_name == "msedge":
                       browser = p.chromium.launch(
-                          channel="msedge",
                           headless=True,
-                          args=["--no-first-run", "--no-default-browser-check"],
+                          args=[
+                              "--no-first-run",
+                              "--no-default-browser-check",
+                          ],
+                      )
+                  elif browser_name == "firefox":
+                      browser = p.firefox.launch(
+                          headless=True,
+                          firefox_user_prefs={
+                              "browser.shell.checkDefaultBrowser": False,
+                              "browser.aboutwelcome.enabled": False,
+                              "startup.homepage_welcome_url": "about:blank",
+                              "startup.homepage_welcome_url.additional": "",
+                          },
                       )
                   else:
                       raise RuntimeError(f"Unsupported browser {browser_name}")
 
                   page = browser.new_page(viewport={"width": width, "height": height})
-                  page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                  response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                  if response is None:
+                      raise RuntimeError("Page.goto returned no response")
+                  if response.status >= 500:
+                      raise RuntimeError(f"Page.goto returned HTTP {response.status}")
+                  page.wait_for_selector("body", timeout=15000)
                   page.wait_for_timeout(1500)
                   page.screenshot(path=str(screenshot_path), full_page=True)
                   browser.close()
@@ -206,7 +282,7 @@ jobs:
                           f"runner_os={runner_os}",
                           f"browser={browser_name}",
                           f"resolution={resolution}",
-                          f"dll_mode={dll_mode}",
+                          f"variant={variant}",
                           f"status={metadata['status']}",
                           f"url={metadata.get('url', '')}",
                           f"error={metadata.get('error', '')}",
@@ -222,13 +298,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exe-matrix-${{ matrix.runner }}-${{ matrix.browser }}-${{ matrix.resolution }}-${{ matrix.dll_mode }}
+          name: exe-matrix-v2-${{ matrix.runner }}-${{ matrix.browser }}-${{ matrix.resolution }}-${{ matrix.variant }}
           path: matrix-run
           if-no-files-found: warn
           retention-days: 3
 
   aggregate:
-    name: aggregate
+    name: aggregate-v2
     if: always()
     needs: exe-matrix
     runs-on: ubuntu-latest
@@ -237,7 +313,7 @@ jobs:
       - name: Download matrix artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: exe-matrix-*
+          pattern: exe-matrix-v2-*
           path: matrix-collected
           merge-multiple: false
 
@@ -277,7 +353,7 @@ jobs:
                   r.get("runner", ""),
                   r.get("browser", ""),
                   r.get("resolution", ""),
-                  r.get("dll_mode", ""),
+                  r.get("variant", ""),
               )
           )
 
@@ -285,7 +361,7 @@ jobs:
           with csv_path.open("w", newline="", encoding="utf-8") as f:
               writer = csv.DictWriter(
                   f,
-                  fieldnames=["runner", "runner_os", "browser", "resolution", "dll_mode", "status", "url", "error"],
+                  fieldnames=["runner", "runner_os", "browser", "resolution", "variant", "status", "url", "error"],
               )
               writer.writeheader()
               for row in rows:
@@ -295,7 +371,7 @@ jobs:
                           "runner_os": row.get("runner_os", ""),
                           "browser": row.get("browser", ""),
                           "resolution": row.get("resolution", ""),
-                          "dll_mode": row.get("dll_mode", ""),
+                          "variant": row.get("variant", ""),
                           "status": row.get("status", ""),
                           "url": row.get("url", ""),
                           "error": row.get("error", ""),
@@ -305,28 +381,28 @@ jobs:
           pass_count = sum(1 for r in rows if r.get("status") == "PASS")
           fail_count = sum(1 for r in rows if r.get("status") != "PASS")
           md_lines = [
-              "# EXE Matrix Summary",
+              "# EXE Matrix Summary V2",
               "",
               f"Total cells: {len(rows)}",
               f"Pass: {pass_count}",
               f"Fail: {fail_count}",
               "",
-              "| runner | browser | resolution | dll_mode | status |",
-              "|---|---|---|---|---|",
+              "| runner | browser | variant | status |",
+              "|---|---|---|---|",
           ]
           for row in rows:
               md_lines.append(
-                  f"| {row.get('runner', '')} | {row.get('browser', '')} | {row.get('resolution', '')} | {row.get('dll_mode', '')} | {row.get('status', '')} |"
+                  f"| {row.get('runner', '')} | {row.get('browser', '')} | {row.get('variant', '')} | {row.get('status', '')} |"
               )
           (output / "matrix_summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
           PY
 
           cd matrix-final
-          zip -rq exe-matrix-bundle.zip screenshots logs matrix_summary.csv matrix_summary.md
+          zip -rq exe-matrix-bundle-v2.zip screenshots logs matrix_summary.csv matrix_summary.md
 
       - name: Upload combined matrix artifact
         uses: actions/upload-artifact@v4
         with:
-          name: exe-matrix-bundle
-          path: matrix-final/exe-matrix-bundle.zip
+          name: exe-matrix-bundle-v2
+          path: matrix-final/exe-matrix-bundle-v2.zip
           retention-days: 7
