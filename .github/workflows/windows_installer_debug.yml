@@ -1,0 +1,175 @@
+name: Windows Installer Debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-installer-debug:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: powershell
+    env:
+      REPO_ROOT: ${{ github.workspace }}
+      ARTIFACT_DIR: ${{ github.workspace }}\installer-debug-artifacts
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          python -m pip install --upgrade pip "setuptools<70.0.0"
+          pip install pyinstaller playwright
+          pip install .
+
+      - name: Install Playwright browser
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          python -m playwright install chromium
+
+      - name: Ensure NIDRA model files
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          New-Item -ItemType Directory -Force -Path nidra\nidra\NIDRA\models | Out-Null
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6.onnx -OutFile nidra\nidra\NIDRA\models\ez6.onnx
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6moe.onnx -OutFile nidra\nidra\NIDRA\models\ez6moe.onnx
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024.onnx -OutFile nidra\nidra\NIDRA\models\u-sleep-nsrr-2024.onnx
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024_eeg.onnx -OutFile nidra\nidra\NIDRA\models\u-sleep-nsrr-2024_eeg.onnx
+
+      - name: Build executable with PyInstaller
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          if (Test-Path -Path build) { Remove-Item -Recurse -Force build }
+          if (Test-Path -Path dist) { Remove-Item -Recurse -Force dist }
+          python -m PyInstaller NAPVIEW.spec
+
+      - name: Run built installer and exercise GUI
+        run: |
+          Set-Location -Path $env:REPO_ROOT
+          New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
+
+          $distTreePath = Join-Path $env:ARTIFACT_DIR "dist_tree.txt"
+          Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Recurse -Force | Format-Table -AutoSize | Out-File -FilePath $distTreePath -Encoding utf8
+
+          $foundExe = Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist\NAPVIEW") -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $foundExe) { throw "Built executable not found under dist\\NAPVIEW" }
+          $exePath = $foundExe.FullName
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "exe_path.txt") -Value $exePath -Encoding utf8
+
+          $env:NAPVIEW_NO_AUTO_BROWSER = "1"
+          $proc = Start-Process -FilePath $exePath -PassThru
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "process_pid.txt") -Value "$($proc.Id)" -Encoding utf8
+
+          try {
+            $url = $null
+            $deadline = (Get-Date).AddMinutes(4)
+            while ((Get-Date) -lt $deadline -and -not $url) {
+              foreach ($port in 8145..8205) {
+                try {
+                  $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2
+                  if ($response.StatusCode -lt 500) {
+                    $url = "http://127.0.0.1:$port/"
+                    break
+                  }
+                } catch {}
+              }
+              if (-not $url) { Start-Sleep -Seconds 2 }
+            }
+            if (-not $url) {
+              throw "Timed out waiting for Napview GUI URL on localhost ports 8145-8205"
+            }
+
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_url.txt") -Value $url -Encoding utf8
+            $env:TEST_URL = $url
+            $env:SCREENSHOT_PATH = (Join-Path $env:ARTIFACT_DIR "gui_after_start.png")
+            $env:START_RESPONSE_PATH = (Join-Path $env:ARTIFACT_DIR "start_response.json")
+
+            $py = @'
+            import json
+            import os
+            from pathlib import Path
+
+            from playwright.sync_api import sync_playwright
+
+            url = os.environ["TEST_URL"]
+            screenshot_path = Path(os.environ["SCREENSHOT_PATH"])
+            start_response_path = Path(os.environ["START_RESPONSE_PATH"])
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--no-first-run", "--no-default-browser-check"],
+                )
+                page = browser.new_page(viewport={"width": 1280, "height": 720})
+                try:
+                    response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    if response is None:
+                        raise RuntimeError("Initial page load returned no response")
+                    page.wait_for_timeout(5000)
+                    page.wait_for_selector("#startButton:not([disabled])", timeout=60000)
+                    with page.expect_response(
+                        lambda r: r.url.endswith("/start") and r.request.method == "POST",
+                        timeout=120000,
+                    ) as start_response_info:
+                        page.click("#startButton")
+                    payload = start_response_info.value.json()
+                    start_response_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                    if payload.get("status") != "success":
+                        raise RuntimeError(f"START failed: {payload}")
+                    page.wait_for_timeout(120000)
+                finally:
+                    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(screenshot_path), full_page=True)
+                    browser.close()
+            '@
+            $py = $py -replace '(?m)^ {12}', ''
+            $py | python -
+          }
+          finally {
+            Start-Sleep -Seconds 2
+            if ($proc -and -not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+            Get-Process -Name "NAPVIEW" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+          $dataRoot = Join-Path $env:LOCALAPPDATA "napview\data"
+          if (Test-Path -Path $dataRoot) {
+            $copyRoot = Join-Path $env:ARTIFACT_DIR "napview-data"
+            New-Item -ItemType Directory -Force -Path $copyRoot | Out-Null
+            Copy-Item -Path (Join-Path $dataRoot "*.log") -Destination $copyRoot -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path (Join-Path $dataRoot "config.json") -Destination $copyRoot -Force -ErrorAction SilentlyContinue
+            if (Test-Path -Path (Join-Path $dataRoot "temp")) {
+              Copy-Item -Path (Join-Path $dataRoot "temp") -Destination $copyRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $scanPath = Join-Path $env:ARTIFACT_DIR "prediction_scan.txt"
+          if (Test-Path -Path (Join-Path $env:ARTIFACT_DIR "napview-data")) {
+            $hits = Select-String -Path (Join-Path $env:ARTIFACT_DIR "napview-data\*.log") -Pattern "prediction successful" -SimpleMatch -CaseSensitive:$false -ErrorAction SilentlyContinue
+            if ($hits) {
+              $hits | ForEach-Object { "$($_.Path):$($_.LineNumber):$($_.Line)" } | Out-File -FilePath $scanPath -Encoding utf8
+            } else {
+              Set-Content -Path $scanPath -Value "No 'prediction successful' entries found in copied log files." -Encoding utf8
+            }
+          } else {
+            Set-Content -Path $scanPath -Value "No napview data directory copied." -Encoding utf8
+          }
+
+      - name: Upload debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-debug
+          path: ${{ github.workspace }}\installer-debug-artifacts
+          if-no-files-found: warn
+          retention-days: 7
