@@ -1,0 +1,480 @@
+name: EXE Matrix Tester V3
+
+on:
+  workflow_dispatch:
+
+jobs:
+  exe-matrix:
+    name: exe-matrix-v3 (${{ matrix.runner }}, ${{ matrix.browser }}, ${{ matrix.variant }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        runner:
+          - ubuntu-latest
+          - ubuntu-22.04
+          - ubuntu-24.04-arm
+          - windows-latest
+          - windows-2025
+          - windows-11-arm
+          - macos-latest
+          - macos-15
+          - macos-15-intel
+          - macos-14
+          - macos-13
+          - macos-26
+        browser:
+          - chromium
+          - firefox
+        resolution:
+          - 1280x720
+        variant:
+          - installer
+          - python_package
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip "setuptools<70.0.0"
+          pip install .
+          pip install playwright
+
+      - name: Install PyInstaller
+        if: matrix.variant == 'installer'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install pyinstaller
+
+      - name: Ensure NIDRA model files
+        if: matrix.variant == 'installer'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import urlretrieve
+
+          model_dir = Path("nidra/nidra/NIDRA/models")
+          model_dir.mkdir(parents=True, exist_ok=True)
+
+          base = "https://huggingface.co/pzerr/NIDRA_models/resolve/main"
+          files = [
+              "ez6.onnx",
+              "ez6moe.onnx",
+              "u-sleep-nsrr-2024.onnx",
+              "u-sleep-nsrr-2024_eeg.onnx",
+          ]
+          for name in files:
+              target = model_dir / name
+              if target.exists():
+                  continue
+              urlretrieve(f"{base}/{name}", target)
+          PY
+
+      - name: Build executable with PyInstaller
+        if: matrix.variant == 'installer'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build dist
+          python -m PyInstaller NAPVIEW.spec
+
+      - name: Install browser runtime (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m playwright install --with-deps "${{ matrix.browser }}"
+
+      - name: Install browser runtime (non-Linux)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m playwright install "${{ matrix.browser }}"
+
+      - name: Launch, screenshot, collect logs
+        shell: bash
+        env:
+          MATRIX_RUNNER: ${{ matrix.runner }}
+          MATRIX_BROWSER: ${{ matrix.browser }}
+          MATRIX_RESOLUTION: ${{ matrix.resolution }}
+          MATRIX_VARIANT: ${{ matrix.variant }}
+          RUNNER_OS: ${{ runner.os }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          from playwright.sync_api import sync_playwright
+
+          runner = os.environ["MATRIX_RUNNER"]
+          browser_name = os.environ["MATRIX_BROWSER"]
+          resolution = os.environ["MATRIX_RESOLUTION"]
+          variant = os.environ["MATRIX_VARIANT"]
+          runner_os = os.environ["RUNNER_OS"]
+          width_str, height_str = resolution.split("x")
+          width = int(width_str)
+          height = int(height_str)
+
+          root = Path("matrix-run")
+          logs_dir = root / "logs"
+          shots_dir = root / "screenshots"
+          root.mkdir(exist_ok=True)
+          logs_dir.mkdir(exist_ok=True)
+          shots_dir.mkdir(exist_ok=True)
+
+          server_log_path = logs_dir / "napview_server.log"
+          session_log_copy_path = logs_dir / "napview_session.log"
+          runner_log_path = logs_dir / "runner.log"
+          metadata_path = root / "metadata.json"
+          screenshot_path = shots_dir / f"{runner}__{browser_name}__{resolution}__{variant}.png"
+
+          if variant == "installer":
+              dist_root = Path("dist") / "NAPVIEW"
+              names = {"NAPVIEW.exe", "NAPVIEW"}
+              candidates = [p for p in dist_root.rglob("*") if p.is_file() and p.name in names]
+              if not candidates:
+                  raise RuntimeError(f"Built executable not found under {dist_root}")
+              if os.name == "nt":
+                  candidates.sort(key=lambda p: (p.suffix.lower() != ".exe", len(p.parts)))
+              else:
+                  candidates.sort(key=lambda p: (p.suffix.lower() == ".exe", len(p.parts)))
+              start_cmd = [str(candidates[0])]
+          elif variant == "python_package":
+              start_cmd = [sys.executable, "-m", "napview.napview"]
+          else:
+              raise RuntimeError(f"Unsupported variant {variant}")
+
+          metadata = {
+              "runner": runner,
+              "runner_os": runner_os,
+              "browser": browser_name,
+              "resolution": resolution,
+              "variant": variant,
+              "start_cmd": start_cmd,
+              "status": "UNKNOWN",
+              "url": "",
+              "session_log_path": "",
+              "prediction_in_terminal": False,
+              "prediction_in_session": False,
+              "error": "",
+          }
+
+          proc = None
+          page = None
+          log_file = None
+          try:
+              log_file = server_log_path.open("w", encoding="utf-8")
+              child_env = os.environ.copy()
+              child_env["NAPVIEW_NO_AUTO_BROWSER"] = "1"
+              proc = subprocess.Popen(
+                  start_cmd,
+                  stdout=log_file,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  env=child_env,
+              )
+
+              deadline = time.time() + 240
+              url = ""
+              while time.time() < deadline:
+                  if proc.poll() is not None:
+                      tail = ""
+                      if server_log_path.exists():
+                          tail = server_log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+                      raise RuntimeError(f"napview exited early with code {proc.returncode}. log tail: {tail}")
+                  if server_log_path.exists():
+                      text = server_log_path.read_text(encoding="utf-8", errors="replace")
+                      match = re.search(r"Server started at (http://(?:localhost|127\\.0\\.0\\.1):\\d+)", text)
+                      if match:
+                          url = match.group(1)
+                          break
+                  for port in range(8145, 8205):
+                      probe_url = f"http://127.0.0.1:{port}"
+                      try:
+                          with urllib.request.urlopen(probe_url, timeout=1) as response:
+                              if response.status < 500:
+                                  url = probe_url
+                                  break
+                      except (urllib.error.URLError, TimeoutError):
+                          continue
+                  if url:
+                      break
+                  time.sleep(1)
+
+              if not url:
+                  raise RuntimeError("Timed out waiting for server URL in logs")
+
+              metadata["url"] = url
+
+              with sync_playwright() as p:
+                  if browser_name == "chromium":
+                      browser = p.chromium.launch(
+                          headless=True,
+                          args=[
+                              "--no-first-run",
+                              "--no-default-browser-check",
+                          ],
+                      )
+                  elif browser_name == "firefox":
+                      browser = p.firefox.launch(
+                          headless=True,
+                          firefox_user_prefs={
+                              "browser.shell.checkDefaultBrowser": False,
+                              "browser.aboutwelcome.enabled": False,
+                              "startup.homepage_welcome_url": "about:blank",
+                              "startup.homepage_welcome_url.additional": "",
+                          },
+                      )
+                  else:
+                      raise RuntimeError(f"Unsupported browser {browser_name}")
+
+                  page = browser.new_page(viewport={"width": width, "height": height})
+                  response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                  if response is None:
+                      raise RuntimeError("Page.goto returned no response")
+                  if response.status >= 500:
+                      raise RuntimeError(f"Page.goto returned HTTP {response.status}")
+                  page.wait_for_selector("body", timeout=15000)
+                  page.wait_for_timeout(5000)
+                  page.wait_for_selector("#startButton:not([disabled])", timeout=60000)
+                  with page.expect_response(
+                      lambda r: r.url.endswith("/start") and r.request.method == "POST",
+                      timeout=120000,
+                  ) as start_resp_info:
+                      page.click("#startButton")
+                  start_payload = start_resp_info.value.json()
+                  if start_payload.get("status") != "success":
+                      raise RuntimeError(f"/start failed: {start_payload}")
+                  page.wait_for_timeout(300000)
+                  page.screenshot(path=str(screenshot_path), full_page=True)
+                  browser.close()
+
+              config_url = f"{url}/load_config"
+              with urllib.request.urlopen(config_url, timeout=20) as response:
+                  config = json.loads(response.read().decode("utf-8", errors="replace"))
+
+              base_path_value = config.get("base_path")
+              session_log_name = config.get("log_file_name")
+              if not base_path_value or not session_log_name:
+                  raise RuntimeError(
+                      f"Could not resolve session log path from /load_config: base_path={base_path_value}, log_file_name={session_log_name}"
+                  )
+
+              session_log_source_path = Path(base_path_value) / session_log_name
+              session_log_deadline = time.time() + 60
+              while time.time() < session_log_deadline and not session_log_source_path.exists():
+                  time.sleep(1)
+              if not session_log_source_path.exists():
+                  raise RuntimeError(f"Session log file not found at {session_log_source_path}")
+
+              session_log_copy_path.write_bytes(session_log_source_path.read_bytes())
+              metadata["session_log_path"] = str(session_log_source_path)
+
+              log_file.flush()
+              terminal_text = server_log_path.read_text(encoding="utf-8", errors="replace").lower()
+              session_text = session_log_copy_path.read_text(encoding="utf-8", errors="replace").lower()
+
+              required = "prediction successful"
+              metadata["prediction_in_terminal"] = required in terminal_text
+              metadata["prediction_in_session"] = required in session_text
+              if not metadata["prediction_in_terminal"] or not metadata["prediction_in_session"]:
+                  raise RuntimeError(
+                      f'Missing "{required}" in logs: '
+                      f'terminal={metadata["prediction_in_terminal"]}, session={metadata["prediction_in_session"]}'
+                  )
+
+              metadata["status"] = "PASS"
+          except Exception as exc:
+              metadata["status"] = "FAIL"
+              metadata["error"] = str(exc)
+              if page is not None:
+                  try:
+                      page.screenshot(path=str(screenshot_path), full_page=True)
+                  except Exception:
+                      pass
+              raise
+          finally:
+              if log_file is not None:
+                  log_file.flush()
+                  log_file.close()
+              if proc is not None and proc.poll() is None:
+                  proc.terminate()
+                  try:
+                      proc.wait(timeout=20)
+                  except subprocess.TimeoutExpired:
+                      proc.kill()
+                      proc.wait(timeout=20)
+              runner_log_path.write_text(
+                  "\n".join(
+                      [
+                          f"runner={runner}",
+                          f"runner_os={runner_os}",
+                          f"browser={browser_name}",
+                          f"resolution={resolution}",
+                          f"variant={variant}",
+                          f"status={metadata['status']}",
+                          f"url={metadata.get('url', '')}",
+                          f"session_log_path={metadata.get('session_log_path', '')}",
+                          f"prediction_in_terminal={metadata.get('prediction_in_terminal', False)}",
+                          f"prediction_in_session={metadata.get('prediction_in_session', False)}",
+                          f"error={metadata.get('error', '')}",
+                      ]
+                  )
+                  + "\n",
+                  encoding="utf-8",
+              )
+              metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+          PY
+
+      - name: Upload matrix cell artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exe-matrix-v3-${{ matrix.runner }}-${{ matrix.browser }}-${{ matrix.resolution }}-${{ matrix.variant }}
+          path: matrix-run
+          if-no-files-found: warn
+          retention-days: 3
+
+  aggregate:
+    name: aggregate-v3
+    if: always()
+    needs: exe-matrix
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: exe-matrix-v3-*
+          path: matrix-collected
+          merge-multiple: false
+
+      - name: Build consolidated bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          collected = Path("matrix-collected")
+          output = Path("matrix-final")
+          output.mkdir(exist_ok=True)
+          (output / "screenshots").mkdir(exist_ok=True)
+          (output / "logs").mkdir(exist_ok=True)
+
+          rows = []
+          artifact_dirs = sorted([p for p in collected.iterdir() if p.is_dir()]) if collected.exists() else []
+          for artifact_dir in artifact_dirs:
+              metadata_file = artifact_dir / "metadata.json"
+              if not metadata_file.exists():
+                  continue
+              data = json.loads(metadata_file.read_text(encoding="utf-8"))
+              rows.append(data)
+
+              for shot in (artifact_dir / "screenshots").glob("*.png"):
+                  target = output / "screenshots" / f"{artifact_dir.name}__{shot.name}"
+                  target.write_bytes(shot.read_bytes())
+              for log_file in (artifact_dir / "logs").glob("*"):
+                  target = output / "logs" / f"{artifact_dir.name}__{log_file.name}"
+                  target.write_bytes(log_file.read_bytes())
+
+          rows.sort(
+              key=lambda r: (
+                  r.get("runner", ""),
+                  r.get("browser", ""),
+                  r.get("resolution", ""),
+                  r.get("variant", ""),
+              )
+          )
+
+          csv_path = output / "matrix_summary.csv"
+          with csv_path.open("w", newline="", encoding="utf-8") as f:
+              writer = csv.DictWriter(
+                  f,
+                  fieldnames=[
+                      "runner",
+                      "runner_os",
+                      "browser",
+                      "resolution",
+                      "variant",
+                      "status",
+                      "url",
+                      "session_log_path",
+                      "prediction_in_terminal",
+                      "prediction_in_session",
+                      "error",
+                  ],
+              )
+              writer.writeheader()
+              for row in rows:
+                  writer.writerow(
+                      {
+                          "runner": row.get("runner", ""),
+                          "runner_os": row.get("runner_os", ""),
+                          "browser": row.get("browser", ""),
+                          "resolution": row.get("resolution", ""),
+                          "variant": row.get("variant", ""),
+                          "status": row.get("status", ""),
+                          "url": row.get("url", ""),
+                          "session_log_path": row.get("session_log_path", ""),
+                          "prediction_in_terminal": row.get("prediction_in_terminal", False),
+                          "prediction_in_session": row.get("prediction_in_session", False),
+                          "error": row.get("error", ""),
+                      }
+                  )
+
+          pass_count = sum(1 for r in rows if r.get("status") == "PASS")
+          fail_count = sum(1 for r in rows if r.get("status") != "PASS")
+          md_lines = [
+              "# EXE Matrix Summary V3",
+              "",
+              f"Total cells: {len(rows)}",
+              f"Pass: {pass_count}",
+              f"Fail: {fail_count}",
+              "",
+              "| runner | browser | variant | status | prediction_in_terminal | prediction_in_session |",
+              "|---|---|---|---|---|---|",
+          ]
+          for row in rows:
+              md_lines.append(
+                  f"| {row.get('runner', '')} | {row.get('browser', '')} | {row.get('variant', '')} | {row.get('status', '')} | {row.get('prediction_in_terminal', False)} | {row.get('prediction_in_session', False)} |"
+              )
+          (output / "matrix_summary.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+          PY
+
+          cd matrix-final
+          zip -rq exe-matrix-bundle-v3.zip screenshots logs matrix_summary.csv matrix_summary.md
+
+      - name: Upload combined matrix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: exe-matrix-bundle-v3
+          path: matrix-final/exe-matrix-bundle-v3.zip
+          retention-days: 7
