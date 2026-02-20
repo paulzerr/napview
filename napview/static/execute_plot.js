@@ -32,6 +32,8 @@ const DEFAULT_THEME = {
 };
 const ZOOM_MIN_MINUTES = 2;
 const ZOOM_MAX_MINUTES = 120;
+const WAITING_PLACEHOLDER_MESSAGE = "Waiting for data...\nThis may take up to one minute.\nSleep stage estimates stabilize after about 5 minutes.";
+let lastAnalyzerStatusMessage = WAITING_PLACEHOLDER_MESSAGE;
 
 function paletteSlice(name, count) {
     const palette = PALETTES[name] || PALETTES[DEFAULT_PALETTE];
@@ -40,6 +42,30 @@ function paletteSlice(name, count) {
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+}
+
+function setChartPlaceholderMessage(message) {
+    document.querySelectorAll(".chart-placeholder").forEach((placeholder) => {
+        placeholder.innerText = message;
+    });
+}
+
+async function refreshAnalyzerStatusMessage() {
+    try {
+        const response = await fetch('/analyzer_status');
+        if (!response.ok) {
+            return;
+        }
+        const status = await response.json();
+        const message = status.model_bootstrap_error || WAITING_PLACEHOLDER_MESSAGE;
+        if (message === lastAnalyzerStatusMessage) {
+            return;
+        }
+        lastAnalyzerStatusMessage = message;
+        setChartPlaceholderMessage(message);
+    } catch {
+        return;
+    }
 }
 
 class DataPlotter {
@@ -392,6 +418,10 @@ async function initCharts() {
         });
     }
     setupColorDialog(config.palette, config.colors, config.customColors);
+    await refreshAnalyzerStatusMessage();
+    setInterval(() => {
+        refreshAnalyzerStatusMessage();
+    }, 2000);
     chart1Plotter.startPlotting();
     chart2Plotter.startPlotting();
 }

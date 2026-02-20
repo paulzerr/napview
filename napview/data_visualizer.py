@@ -35,6 +35,7 @@ class Visualizer:
 
         self.db_handler = DatabaseHandler(self.base_path)
         self.db_handler.setup_database()
+        self.model_bootstrap_status_path = os.path.join(self.base_path, "temp", "model_bootstrap_status.json")
 
         self.visualizer_port = self.config.get('visualizer_port', 8080)
 
@@ -83,6 +84,18 @@ class Visualizer:
                 return jsonify(data)
             except Exception as e:
                 self.logger.error(f"Error in /data2 endpoint: {e}", exc_info=True)
+                return jsonify({'error': 'An error occurred'}), 500
+
+        @self.app.route('/analyzer_status')
+        def analyzer_status():
+            try:
+                message = None
+                if os.path.exists(self.model_bootstrap_status_path):
+                    with open(self.model_bootstrap_status_path, 'r', encoding='utf-8') as status_file:
+                        message = json.load(status_file).get("message")
+                return jsonify({'model_bootstrap_error': message})
+            except Exception as e:
+                self.logger.error(f"Error in /analyzer_status endpoint: {e}", exc_info=True)
                 return jsonify({'error': 'An error occurred'}), 500
 
     def run(self):

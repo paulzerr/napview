@@ -6,6 +6,11 @@ import sys
 
 
 def main() -> None:
+    if __package__ in (None, ""):
+        project_root = str(Path(__file__).resolve().parent.parent)
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         resource_root = Path(sys._MEIPASS).resolve() / "napview"
     elif getattr(sys, "frozen", False):

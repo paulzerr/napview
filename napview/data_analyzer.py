@@ -2,6 +2,7 @@ import os
 import math
 import time
 import json
+from pathlib import Path
 import numpy as np
 import scipy.signal as sp_sig
 
@@ -20,6 +21,7 @@ class Analyzer:
 
         self.mode             = mode
         self.base_path        = base_path
+        self.model_bootstrap_status_path = Path(self.base_path) / "temp" / "model_bootstrap_status.json"
 
         # Create a temporary directory for NIDRA output
         self.nidra_output_dir = os.path.join(self.base_path, 'nidra_temp')
@@ -36,6 +38,37 @@ class Analyzer:
 
         self.eeginfo = self.db_handler.retrieve_info() # TODO: read this from config (only sample rate needed, perhaps channels)
         self.eeginfo.channel_names = json.loads(self.eeginfo.channel_names)
+
+    def _write_model_bootstrap_failure(self, message):
+        self.model_bootstrap_status_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.model_bootstrap_status_path, "w", encoding="utf-8") as status_file:
+            json.dump({"message": message}, status_file)
+
+    def _clear_model_bootstrap_failure(self):
+        if self.model_bootstrap_status_path.exists():
+            self.model_bootstrap_status_path.unlink()
+
+    def _ensure_nidra_models(self):
+        required_models = [
+            "u-sleep-nsrr-2024.onnx",
+            "u-sleep-nsrr-2024_eeg.onnx",
+            "ez6.onnx",
+            "ez6moe.onnx",
+        ]
+        model_dir = Path(NIDRA.utils.get_model_path())
+        self.logger.info(f"Analyzer ({self.mode}): checking NIDRA models at {model_dir}")
+        self._clear_model_bootstrap_failure()
+        missing_models = [name for name in required_models if not (model_dir / name).exists()]
+        if missing_models:
+            self.logger.info(f"Analyzer ({self.mode}): ensuring NIDRA models are available...")
+            if not NIDRA.utils.download_assets("models", self.logger):
+                message = (
+                    f"Model download failed, cannot proceed. Please manually download models from "
+                    f"https://huggingface.co/pzerr/NIDRA_models and place them in {model_dir}."
+                )
+                self._write_model_bootstrap_failure(message)
+                raise RuntimeError(message)
+        self.logger.info(f"Analyzer ({self.mode}): NIDRA models ready at {model_dir}")
 
 
     def _calculate_retrieval_start_index(self, start_idx, end_idx):
@@ -162,6 +195,8 @@ class Analyzer:
             return None
 
     def run(self):
+        self._ensure_nidra_models()
+
         # this will become useful once we implement persistent storage of analysis results, and restarting the analyzer without losing progress
         #
         # current_epoch_index = AnalysisResult.select().where(AnalysisResult.analyzer_mode == self.mode).count()
