@@ -55,24 +55,63 @@ jobs:
       - name: Run built installer and exercise GUI
         run: |
           Set-Location -Path $env:REPO_ROOT
+          $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
 
-          $distTreePath = Join-Path $env:ARTIFACT_DIR "dist_tree.txt"
-          Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Recurse -Force | Format-Table -AutoSize | Out-File -FilePath $distTreePath -Encoding utf8
+          $transcriptPath = Join-Path $env:ARTIFACT_DIR "runner_transcript.log"
+          Start-Transcript -Path $transcriptPath -Force | Out-Null
 
-          $foundExe = Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist\NAPVIEW") -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $foundExe) { throw "Built executable not found under dist\\NAPVIEW" }
-          $exePath = $foundExe.FullName
-          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "exe_path.txt") -Value $exePath -Encoding utf8
+          $runnerError = $null
+          $proc = $null
+          $url = $null
+          $dataRoots = New-Object System.Collections.Generic.List[string]
+          $browserRegex = '^(chrome|msedge|firefox|iexplore|brave|opera)\.exe$'
 
-          $env:NAPVIEW_NO_AUTO_BROWSER = "1"
-          $proc = Start-Process -FilePath $exePath -PassThru
-          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "process_pid.txt") -Value "$($proc.Id)" -Encoding utf8
+          function Write-JsonFile {
+            param(
+              [Parameter(Mandatory = $true)][string]$Path,
+              [Parameter(Mandatory = $true)][object]$Value
+            )
+            $json = $Value | ConvertTo-Json -Depth 8
+            Set-Content -Path $Path -Value $json -Encoding utf8
+          }
+
+          function Get-BrowserProcessSnapshot {
+            $items = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match $browserRegex } |
+              Select-Object Name, ProcessId, ParentProcessId, CreationDate, CommandLine
+            if ($items) { return @($items) }
+            return @()
+          }
+
+          Remove-Item Env:NAPVIEW_NO_AUTO_BROWSER -ErrorAction SilentlyContinue
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "auto_browser_env_value.txt") -Value "<unset>" -Encoding utf8
+
+          $browserBefore = Get-BrowserProcessSnapshot
+          Write-JsonFile -Path (Join-Path $env:ARTIFACT_DIR "browser_processes_before.json") -Value $browserBefore
+
+          $browserCheck = $null
 
           try {
+            $distTreePath = Join-Path $env:ARTIFACT_DIR "dist_tree.txt"
+            Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Recurse -Force | Format-Table -AutoSize | Out-File -FilePath $distTreePath -Encoding utf8
+
+            $foundExe = Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist\NAPVIEW") -Filter "NAPVIEW.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $foundExe) { throw "Built executable not found under dist\\NAPVIEW" }
+            $exePath = $foundExe.FullName
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "exe_path.txt") -Value $exePath -Encoding utf8
+
+            $stdoutPath = Join-Path $env:ARTIFACT_DIR "napview_stdout.log"
+            $stderrPath = Join-Path $env:ARTIFACT_DIR "napview_stderr.log"
+            $proc = Start-Process -FilePath $exePath -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "process_pid.txt") -Value "$($proc.Id)" -Encoding utf8
+
             $url = $null
             $deadline = (Get-Date).AddMinutes(4)
             while ((Get-Date) -lt $deadline -and -not $url) {
+              if ($proc.HasExited) {
+                throw "NAPVIEW process exited early with code $($proc.ExitCode)"
+              }
               foreach ($port in 8145..8205) {
                 try {
                   $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2
@@ -89,6 +128,41 @@ jobs:
             }
 
             Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_url.txt") -Value $url -Encoding utf8
+
+            try {
+              $configResponse = Invoke-WebRequest -Uri "${url}load_config" -UseBasicParsing -TimeoutSec 15
+              Set-Content -Path (Join-Path $env:ARTIFACT_DIR "load_config_response.json") -Value $configResponse.Content -Encoding utf8
+              $configJson = $configResponse.Content | ConvertFrom-Json
+              if ($configJson.base_path) {
+                $dataRoots.Add([string]$configJson.base_path)
+                Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_base_path.txt") -Value ([string]$configJson.base_path) -Encoding utf8
+              }
+              if ($configJson.log_file_name) {
+                Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_log_file_name.txt") -Value ([string]$configJson.log_file_name) -Encoding utf8
+              }
+            }
+            catch {
+              ($_ | Out-String) | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "load_config_error.txt") -Encoding utf8
+            }
+
+            $browserAfterNapviewStart = Get-BrowserProcessSnapshot
+            Write-JsonFile -Path (Join-Path $env:ARTIFACT_DIR "browser_processes_after_napview_start.json") -Value $browserAfterNapviewStart
+            $beforeByPid = @{}
+            foreach ($item in $browserBefore) {
+              $beforeByPid["$($item.ProcessId)"] = $true
+            }
+            $newBrowserAfterNapviewStart = @($browserAfterNapviewStart | Where-Object { -not $beforeByPid.ContainsKey("$($_.ProcessId)") })
+            $browserCheck = [ordered]@{
+              phase = "after_napview_start_before_playwright"
+              auto_browser_disabled = $false
+              detected_url = $url
+              before_count = @($browserBefore).Count
+              after_count = @($browserAfterNapviewStart).Count
+              new_browser_process_count = @($newBrowserAfterNapviewStart).Count
+              new_browser_processes = $newBrowserAfterNapviewStart
+            }
+            Write-JsonFile -Path (Join-Path $env:ARTIFACT_DIR "browser_open_check.json") -Value $browserCheck
+
             $env:TEST_URL = $url
             $env:SCREENSHOT_PATH = (Join-Path $env:ARTIFACT_DIR "gui_after_start.png")
             $env:START_RESPONSE_PATH = (Join-Path $env:ARTIFACT_DIR "start_response.json")
@@ -134,35 +208,89 @@ jobs:
             $py = $py -replace '(?m)^ {2}', ''
             $py | python -
           }
+          catch {
+            $runnerError = $_
+            ($_ | Out-String) | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "run_exception.txt") -Encoding utf8
+          }
           finally {
+            $browserAfter = Get-BrowserProcessSnapshot
+            Write-JsonFile -Path (Join-Path $env:ARTIFACT_DIR "browser_processes_after.json") -Value $browserAfter
+
+            if (-not $browserCheck) {
+              $beforeByPid = @{}
+              foreach ($item in $browserBefore) {
+                $beforeByPid["$($item.ProcessId)"] = $true
+              }
+              $newBrowserProcesses = @($browserAfter | Where-Object { -not $beforeByPid.ContainsKey("$($_.ProcessId)") })
+              Write-JsonFile -Path (Join-Path $env:ARTIFACT_DIR "browser_open_check.json") -Value ([ordered]@{
+                phase = "fallback_finally"
+                auto_browser_disabled = $false
+                detected_url = $url
+                before_count = @($browserBefore).Count
+                after_count = @($browserAfter).Count
+                new_browser_process_count = @($newBrowserProcesses).Count
+                new_browser_processes = $newBrowserProcesses
+              })
+            }
+
+            try {
+              netstat -ano | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "netstat_ano.txt") -Encoding utf8
+            } catch {}
+
             Start-Sleep -Seconds 2
             if ($proc -and -not $proc.HasExited) {
               Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             }
             Get-Process -Name "NAPVIEW" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          }
 
-          $dataRoot = Join-Path $env:LOCALAPPDATA "napview\data"
-          if (Test-Path -Path $dataRoot) {
-            $copyRoot = Join-Path $env:ARTIFACT_DIR "napview-data"
-            New-Item -ItemType Directory -Force -Path $copyRoot | Out-Null
-            Copy-Item -Path (Join-Path $dataRoot "*.log") -Destination $copyRoot -Force -ErrorAction SilentlyContinue
-            Copy-Item -Path (Join-Path $dataRoot "config.json") -Destination $copyRoot -Force -ErrorAction SilentlyContinue
-            if (Test-Path -Path (Join-Path $dataRoot "temp")) {
-              Copy-Item -Path (Join-Path $dataRoot "temp") -Destination $copyRoot -Recurse -Force -ErrorAction SilentlyContinue
+            $defaultDataRoot = Join-Path $env:LOCALAPPDATA "napview\data"
+            if (Test-Path -Path $defaultDataRoot) { $dataRoots.Add($defaultDataRoot) }
+            $roamingDataRoot = Join-Path $env:APPDATA "napview\data"
+            if (Test-Path -Path $roamingDataRoot) { $dataRoots.Add($roamingDataRoot) }
+
+            $uniqueDataRoots = @($dataRoots | Where-Object { $_ } | Sort-Object -Unique)
+            $copiedDataRoots = @()
+            foreach ($sourceRoot in $uniqueDataRoots) {
+              if (Test-Path -Path $sourceRoot) {
+                $safeName = ($sourceRoot -replace '[:\\\/ ]', '_').Trim('_')
+                $destRoot = Join-Path $env:ARTIFACT_DIR "napview-data-$safeName"
+                Copy-Item -Path $sourceRoot -Destination $destRoot -Recurse -Force -ErrorAction SilentlyContinue
+                $copiedDataRoots += $destRoot
+              }
             }
-          }
 
-          $scanPath = Join-Path $env:ARTIFACT_DIR "prediction_scan.txt"
-          if (Test-Path -Path (Join-Path $env:ARTIFACT_DIR "napview-data")) {
-            $hits = Select-String -Path (Join-Path $env:ARTIFACT_DIR "napview-data\*.log") -Pattern "prediction successful" -SimpleMatch -CaseSensitive:$false -ErrorAction SilentlyContinue
-            if ($hits) {
-              $hits | ForEach-Object { "$($_.Path):$($_.LineNumber):$($_.Line)" } | Out-File -FilePath $scanPath -Encoding utf8
+            $scanPath = Join-Path $env:ARTIFACT_DIR "prediction_scan.txt"
+            $copiedLogFiles = @()
+            foreach ($copiedRoot in $copiedDataRoots) {
+              $copiedLogFiles += Get-ChildItem -Path $copiedRoot -Recurse -Filter "*.log" -ErrorAction SilentlyContinue
+            }
+            if (@($copiedLogFiles).Count -gt 0) {
+              $hits = Select-String -Path ($copiedLogFiles.FullName) -Pattern "prediction successful" -SimpleMatch -CaseSensitive:$false -ErrorAction SilentlyContinue
+              if ($hits) {
+                $hits | ForEach-Object { "$($_.Path):$($_.LineNumber):$($_.Line)" } | Out-File -FilePath $scanPath -Encoding utf8
+              } else {
+                Set-Content -Path $scanPath -Value "No 'prediction successful' entries found in copied log files." -Encoding utf8
+              }
             } else {
-              Set-Content -Path $scanPath -Value "No 'prediction successful' entries found in copied log files." -Encoding utf8
+              Set-Content -Path $scanPath -Value "No copied napview log files were found." -Encoding utf8
             }
-          } else {
-            Set-Content -Path $scanPath -Value "No napview data directory copied." -Encoding utf8
+
+            Write-JsonFile -Path (Join-Path $env:ARTIFACT_DIR "run_summary.json") -Value ([ordered]@{
+              status = if ($runnerError) { "FAIL" } else { "PASS" }
+              error = if ($runnerError) { [string]$runnerError.Exception.Message } else { "" }
+              detected_url = $url
+              process_pid = if ($proc) { $proc.Id } else { $null }
+              copied_data_roots = $uniqueDataRoots
+              copied_artifact_dirs = $copiedDataRoots
+            })
+
+            try {
+              Stop-Transcript | Out-Null
+            } catch {}
+          }
+
+          if ($runnerError) {
+            throw $runnerError
           }
 
       - name: Upload debug artifact
