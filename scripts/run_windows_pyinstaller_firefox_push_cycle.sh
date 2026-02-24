@@ -61,16 +61,25 @@ while [[ -z "$RUN_ID" ]]; do
 done
 
 if [[ "$WAIT_FOR_COMPLETION" == "1" ]]; then
-  gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+  WATCH_EXIT_CODE=0
+  if ! gh run watch "$RUN_ID" --repo "$REPO" --exit-status; then
+    WATCH_EXIT_CODE=$?
+  fi
+else
+  WATCH_EXIT_CODE=0
 fi
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-gh run download "$RUN_ID" \
+gh run view "$RUN_ID" --repo "$REPO" --log >"$OUTPUT_DIR/workflow.log" || true
+
+if ! gh run download "$RUN_ID" \
   --repo "$REPO" \
   --name "$ARTIFACT_NAME" \
-  --dir "$OUTPUT_DIR"
+  --dir "$OUTPUT_DIR"; then
+  echo "Artifact '$ARTIFACT_NAME' not downloaded for run $RUN_ID." >&2
+fi
 
 RUN_JSON="$(gh run view "$RUN_ID" \
   --repo "$REPO" \
@@ -94,3 +103,7 @@ echo "Downloaded artifact '$ARTIFACT_NAME' from run $RUN_ID to: $OUTPUT_DIR"
 echo
 echo "Files:"
 find "$OUTPUT_DIR" -maxdepth 3 -type f | sed "s#^$OUTPUT_DIR/##" | sort
+
+if [[ "$WATCH_EXIT_CODE" -ne 0 ]]; then
+  exit "$WATCH_EXIT_CODE"
+fi
