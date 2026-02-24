@@ -108,7 +108,7 @@ jobs:
           function Write-DebugLine {
             param([string]$Message)
             $line = "$(Get-Date -Format o) $Message"
-            $line | Tee-Object -FilePath $debugLogPath -Append
+            $line | Tee-Object -FilePath $debugLogPath -Append | Out-Null
           }
 
           function Get-ProcessOwnedListeningPorts {
