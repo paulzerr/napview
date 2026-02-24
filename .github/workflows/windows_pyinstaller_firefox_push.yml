@@ -143,11 +143,16 @@ jobs:
           Write-DebugLine "powershell_version=$($PSVersionTable.PSVersion)"
           Write-DebugLine "runner_os=$([Environment]::OSVersion.VersionString)"
 
-          $preferredExePath = Join-Path $env:REPO_ROOT "dist\NAPVIEW\runtime\NAPVIEW.exe"
-          if (Test-Path -Path $preferredExePath) {
-            $exePath = (Resolve-Path -Path $preferredExePath).Path
+          $distRoot = Join-Path $env:REPO_ROOT "dist"
+          $rootExePath = Join-Path $distRoot "NAPVIEW.exe"
+          $exeCandidates = @(Get-ChildItem -Path $distRoot -Filter "NAPVIEW.exe" -Recurse | Sort-Object -Property FullName)
+          @($exeCandidates | Select-Object -ExpandProperty FullName) | Set-Content -Path (Join-Path $env:ARTIFACT_DIR "exe_candidates.txt") -Encoding utf8
+
+          $nestedExe = $exeCandidates | Where-Object { $_.FullName -ne $rootExePath } | Select-Object -First 1
+          if ($nestedExe) {
+            $exePath = $nestedExe.FullName
           } else {
-            $exePath = (Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Filter "NAPVIEW.exe" -Recurse | Sort-Object -Property FullName | Select-Object -First 1).FullName
+            $exePath = ($exeCandidates | Select-Object -First 1).FullName
           }
           if (-not $exePath) {
             throw "Could not find NAPVIEW.exe under dist"
@@ -169,7 +174,7 @@ jobs:
           $runnerError = $null
 
           try {
-            $targetHosts = @("127.0.0.1", "localhost", "[::1]")
+            $targetHosts = @("127.0.0.1", "localhost")
             $deadline = (Get-Date).AddMinutes(4)
             $attempt = 0
 
@@ -198,7 +203,7 @@ jobs:
                 foreach ($targetHost in $targetHosts) {
                   $uri = "http://${targetHost}:$port/"
                   try {
-                    $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 2
+                    $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 1 -Proxy $null
                     $okLine = "probe_ok uri=$uri status=$($response.StatusCode)"
                     Write-DebugLine $okLine
                     Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $okLine"
@@ -225,7 +230,7 @@ jobs:
             }
 
             if (-not $url) {
-              throw "Timed out waiting for napview web UI. Hosts tested: 127.0.0.1, localhost, [::1]. Ports tested: 8145-8205 + process-owned listening ports"
+              throw "Timed out waiting for napview web UI. Hosts tested: 127.0.0.1, localhost. Ports tested: 8145-8205 + process-owned listening ports"
             }
 
             Write-DebugLine "Detected URL: $url"
