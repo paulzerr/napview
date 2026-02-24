@@ -28,15 +28,22 @@ if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
   exit 1
 fi
 
+TARGET_SHA=""
 if [[ -n "$(git status --porcelain)" ]]; then
   git add -A
   git commit -m "$COMMIT_MESSAGE"
+  TARGET_SHA="$(git rev-parse HEAD)"
   git push "$SSH_REMOTE_URL" "$BRANCH"
+  TRIGGER_MODE="push"
 else
   echo "Working tree clean. Skipping commit/push."
+  TRIGGER_MODE="workflow_dispatch"
 fi
 
-gh workflow run "$WORKFLOW_FILE" --repo "$REPO" --ref "$BRANCH"
+if [[ "$TRIGGER_MODE" == "workflow_dispatch" ]]; then
+  DISPATCHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  gh workflow run "$WORKFLOW_FILE" --repo "$REPO" --ref "$BRANCH"
+fi
 
 RUN_ID=""
 DEADLINE_EPOCH="$(( $(date +%s) + WAIT_TIMEOUT_MINUTES * 60 ))"
@@ -46,14 +53,20 @@ while [[ -z "$RUN_ID" ]]; do
     exit 1
   fi
 
-  RUN_ID="$(gh run list \
+  RUNS_JSON="$(gh run list \
     --repo "$REPO" \
     --workflow "$WORKFLOW_FILE" \
     --branch "$BRANCH" \
-    --event workflow_dispatch \
-    --limit 1 \
-    --json databaseId \
-    | jq -r '.[0].databaseId // empty')"
+    --limit 20 \
+    --json databaseId,headSha,event,createdAt)"
+
+  if [[ "$TRIGGER_MODE" == "push" ]]; then
+    RUN_ID="$(jq -r --arg sha "$TARGET_SHA" \
+      '[.[] | select(.headSha == $sha)] | sort_by(.createdAt) | last.databaseId // empty' <<<"$RUNS_JSON")"
+  else
+    RUN_ID="$(jq -r --arg ts "$DISPATCHED_AT" \
+      '[.[] | select(.event == "workflow_dispatch" and .createdAt >= $ts)] | sort_by(.createdAt) | last.databaseId // empty' <<<"$RUNS_JSON")"
+  fi
 
   if [[ -z "$RUN_ID" ]]; then
     sleep 5
