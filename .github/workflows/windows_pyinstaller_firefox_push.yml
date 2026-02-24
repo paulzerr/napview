@@ -118,7 +118,7 @@ jobs:
               $ports += @(Get-NetTCPConnection -State Listen -OwningProcess $ProcessId -ErrorAction Stop | Select-Object -ExpandProperty LocalPort)
             }
             catch {
-              Write-DebugLine "Get-NetTCPConnection failed for PID $ProcessId: $($_.Exception.Message)"
+              Write-DebugLine "Get-NetTCPConnection failed for PID ${ProcessId}: $($_.Exception.Message)"
             }
 
             try {
@@ -131,7 +131,7 @@ jobs:
               }
             }
             catch {
-              Write-DebugLine "netstat parse failed for PID $ProcessId: $($_.Exception.Message)"
+              Write-DebugLine "netstat parse failed for PID ${ProcessId}: $($_.Exception.Message)"
             }
 
             return @($ports | Sort-Object -Unique)

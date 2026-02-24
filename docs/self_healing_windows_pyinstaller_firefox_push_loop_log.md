@@ -10,3 +10,5 @@
 - 2026-02-24: Next step is an uncanceled run with current workflow to reach the Napview launch stage and validate localhost detection fixes.
 - 2026-02-24: Run `22365895948` reached launch step but failed before probing with PowerShell parser error `InvalidVariableReferenceWithDrive` in URI interpolation.
 - 2026-02-24: Patched URI construction to `http://${targetHost}:$port/` and rerunning.
+- 2026-02-24: Run `22366223960` still failed in launch step with `InvalidVariableReferenceWithDrive`, now from debug strings using `"$ProcessId: ..."` in the function error paths.
+- 2026-02-24: Loop paused intentionally for handover-only documentation (no further code/workflow changes in this pass).

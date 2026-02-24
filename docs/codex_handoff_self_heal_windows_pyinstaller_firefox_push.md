@@ -1,6 +1,6 @@
 # Codex Handoff: Windows PyInstaller Firefox Push Self-Heal
 
-Last updated: 2026-02-24 (local session date)
+Last updated: 2026-02-24 (local session date, handover refresh)
 
 ## What Happens If This Window Closes
 
@@ -12,14 +12,19 @@ Last updated: 2026-02-24 (local session date)
 
 - Repo: `paulzerr/napview`
 - Branch: `dev`
-- Current local commit: `56cfdd9`
+- Current local commit: `44b0f07`
 - Workflow: `windows_pyinstaller_firefox_push.yml`
 - Expected artifact: `windows-pyinstaller-firefox-push-debug`
-- Latest known run at handoff creation:
-  - Run ID: `22361662755`
+- Latest completed run:
+  - Run ID: `22366223960`
   - Event: `push`
-  - Status: `in_progress`
-  - URL: `https://github.com/paulzerr/napview/actions/runs/22361662755`
+  - Status: `completed`
+  - Conclusion: `failure`
+  - URL: `https://github.com/paulzerr/napview/actions/runs/22366223960`
+- Latest failure root cause:
+  - Launch step parser error (`InvalidVariableReferenceWithDrive`) before probing loop starts.
+  - Failing patterns are debug strings containing `$ProcessId:` (colon immediately after variable in double-quoted string).
+  - Example from run log: `Write-DebugLine "Get-NetTCPConnection failed for PID $ProcessId: $($_.Exception.Message)"`
 
 ## Scripts Added
 
@@ -43,7 +48,7 @@ git pull --ff-only git@github.com:paulzerr/napview.git dev
 If a run is already in progress, continue watching it:
 
 ```bash
-gh run watch 22361662755 --repo paulzerr/napview --exit-status
+gh run watch <RUN_ID> --repo paulzerr/napview --exit-status
 ```
 
 Then fetch latest outputs:
@@ -74,3 +79,12 @@ Use this objective:
 2. Do not ask the user to run push/trigger/fetch manually.
 3. On each failure, collect logs/artifacts, apply fix, commit, and push.
 4. Repeat until workflow is green.
+
+Immediate next fix to apply:
+
+1. In workflow PowerShell, replace debug strings that use `$ProcessId:` with `${ProcessId}:` (or equivalent non-ambiguous interpolation).
+2. Re-run unattended cycle script.
+
+Why the loop paused:
+
+- User explicitly requested handover-only documentation and to not continue the loop in this pass.
