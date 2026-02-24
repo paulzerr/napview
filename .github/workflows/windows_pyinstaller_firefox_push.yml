@@ -143,7 +143,12 @@ jobs:
           Write-DebugLine "powershell_version=$($PSVersionTable.PSVersion)"
           Write-DebugLine "runner_os=$([Environment]::OSVersion.VersionString)"
 
-          $exePath = (Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Filter "NAPVIEW.exe" -Recurse | Select-Object -First 1).FullName
+          $preferredExePath = Join-Path $env:REPO_ROOT "dist\NAPVIEW\runtime\NAPVIEW.exe"
+          if (Test-Path -Path $preferredExePath) {
+            $exePath = (Resolve-Path -Path $preferredExePath).Path
+          } else {
+            $exePath = (Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Filter "NAPVIEW.exe" -Recurse | Sort-Object -Property FullName | Select-Object -First 1).FullName
+          }
           if (-not $exePath) {
             throw "Could not find NAPVIEW.exe under dist"
           }
