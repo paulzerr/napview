@@ -1,7 +1,14 @@
 name: Windows PyInstaller Firefox Push Smoke
 
-"on":
+on:
   push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+concurrency:
+  group: windows-pyinstaller-firefox-push-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pyinstaller-firefox-smoke:
@@ -137,11 +144,11 @@ jobs:
             }
           }
 
-      - name: Upload screenshot artifact
+      - name: Upload debug artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-pyinstaller-firefox-screenshot
-          path: ${{ github.workspace }}/push-pyinstaller-firefox-artifacts/napview_after_2min.png
+          name: windows-pyinstaller-firefox-push-debug
+          path: ${{ github.workspace }}\push-pyinstaller-firefox-artifacts
           if-no-files-found: error
           retention-days: 7
