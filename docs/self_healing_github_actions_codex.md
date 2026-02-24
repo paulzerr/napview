@@ -145,6 +145,26 @@ Use deterministic commit messages for tracking attempts.
 Codex should run these git commands directly (including push), not leave
 the push as a manual user step.
 
+## Fully Automatic One-Command Cycle (this repo)
+
+Use this script to run the full cycle without user intervention:
+
+``` bash
+./scripts/run_windows_pyinstaller_firefox_push_cycle.sh
+```
+
+It performs, in order:
+
+1.  commit + push to `dev` (if there are local changes)
+2.  trigger `windows_pyinstaller_firefox_push.yml` via `workflow_dispatch`
+3.  wait for run completion (unless `WAIT_FOR_COMPLETION=0`)
+4.  download artifact `windows-pyinstaller-firefox-push-debug`
+
+Authentication note: the script pushes via SSH
+(`git@github.com:<owner>/<repo>.git`) and uses your existing `gh` login,
+so no interactive credential prompt is needed when your terminal session
+is already authenticated.
+
 ------------------------------------------------------------------------
 
 # 5. Triggering GitHub Actions
