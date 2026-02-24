@@ -105,11 +105,23 @@ jobs:
           Set-Content -Path $consoleSpecPath -Value $consoleSpecContent -Encoding utf8
           Set-Content -Path (Join-Path $env:ARTIFACT_DIR "pyinstaller_build_mode.txt") -Value "CI override: console=True using NAPVIEW.ci_console.spec" -Encoding utf8
           python -m PyInstaller $consoleSpecPath
-          if (Test-Path -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\warn-NAPVIEW.txt")) {
-            Copy-Item -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\warn-NAPVIEW.txt") -Destination (Join-Path $env:ARTIFACT_DIR "warn-NAPVIEW.txt") -Force
+          $warnCandidates = @(
+            (Join-Path $env:REPO_ROOT "build\NAPVIEW\warn-NAPVIEW.txt"),
+            (Join-Path $env:REPO_ROOT "build\NAPVIEW.ci_console\warn-NAPVIEW.ci_console.txt")
+          )
+          foreach ($warnPath in $warnCandidates) {
+            if (Test-Path -Path $warnPath) {
+              Copy-Item -Path $warnPath -Destination (Join-Path $env:ARTIFACT_DIR ("warn-" + (Split-Path -Leaf $warnPath))) -Force
+            }
           }
-          if (Test-Path -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\xref-NAPVIEW.html")) {
-            Copy-Item -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\xref-NAPVIEW.html") -Destination (Join-Path $env:ARTIFACT_DIR "xref-NAPVIEW.html") -Force
+          $xrefCandidates = @(
+            (Join-Path $env:REPO_ROOT "build\NAPVIEW\xref-NAPVIEW.html"),
+            (Join-Path $env:REPO_ROOT "build\NAPVIEW.ci_console\xref-NAPVIEW.ci_console.html")
+          )
+          foreach ($xrefPath in $xrefCandidates) {
+            if (Test-Path -Path $xrefPath) {
+              Copy-Item -Path $xrefPath -Destination (Join-Path $env:ARTIFACT_DIR ("xref-" + (Split-Path -Leaf $xrefPath))) -Force
+            }
           }
           if (Test-Path -Path (Join-Path $env:REPO_ROOT "dist")) {
             Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Recurse -Force |
@@ -180,16 +192,29 @@ jobs:
 
             while ((Get-Date) -lt $deadline) {
               $attempt += 1
+              $Process.Refresh()
               if ($Process.HasExited) {
                 throw "$Label process exited early with code $($Process.ExitCode)"
               }
 
               $candidatePorts = New-Object System.Collections.Generic.List[int]
-              foreach ($p in 8145..8205) {
-                $candidatePorts.Add([int]$p)
-              }
-              foreach ($p in (Get-ProcessOwnedListeningPorts -ProcessId $Process.Id)) {
+              $processPorts = @(Get-ProcessOwnedListeningPorts -ProcessId $Process.Id)
+              foreach ($p in $processPorts) {
                 if (-not $candidatePorts.Contains([int]$p)) {
+                  $candidatePorts.Add([int]$p)
+                }
+              }
+
+              $listeningPorts = @()
+              try {
+                $listeningPorts = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Select-Object -ExpandProperty LocalPort)
+              }
+              catch {
+                Write-DebugLine "Get-NetTCPConnection listen snapshot failed: $($_.Exception.Message)"
+              }
+
+              foreach ($p in 8145..8205) {
+                if ($listeningPorts -contains [int]$p -and -not $candidatePorts.Contains([int]$p)) {
                   $candidatePorts.Add([int]$p)
                 }
               }
@@ -198,6 +223,11 @@ jobs:
               $attemptHeader = "probe_label=$Label attempt=$attempt pid=$($Process.Id) candidate_ports=$($portList -join ',')"
               Write-DebugLine $attemptHeader
               Add-Content -Path $ProbeLogPath -Value "$(Get-Date -Format o) $attemptHeader"
+
+              if (-not $portList) {
+                Start-Sleep -Seconds 2
+                continue
+              }
 
               foreach ($port in $portList) {
                 foreach ($targetHost in $TargetHosts) {
@@ -366,7 +396,7 @@ jobs:
           $sourceProbeError = ""
           $sourceUrl = $null
           try {
-            $sourceProc = Start-Process -FilePath "python" -ArgumentList "-m", "napview.napview" -WorkingDirectory $env:REPO_ROOT -PassThru -RedirectStandardOutput $sourceStdoutPath -RedirectStandardError $sourceStderrPath
+            $sourceProc = Start-Process -FilePath "python" -ArgumentList "-u", "-m", "napview.napview" -WorkingDirectory $env:REPO_ROOT -PassThru -RedirectStandardOutput $sourceStdoutPath -RedirectStandardError $sourceStderrPath
             Set-Content -Path (Join-Path $env:ARTIFACT_DIR "source_process_pid.txt") -Value "$($sourceProc.Id)" -Encoding utf8
             Write-DebugLine "Started source probe PID=$($sourceProc.Id)"
             $sourceUrl = Wait-ForNapviewWebUi -Process $sourceProc -Label "source_probe" -TimeoutMinutes 2 -TargetHosts $targetHosts -ProbeLogPath $probeLogPath
@@ -460,6 +490,14 @@ jobs:
             try {
               $appDataRoot = Join-Path $env:LOCALAPPDATA "napview"
               Get-ChildItem -Path $appDataRoot -Recurse -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "napview_localappdata_files.txt") -Encoding utf8
+              $knownLogPath = Join-Path $appDataRoot "data\napview_log_temp.log"
+              if (Test-Path -Path $knownLogPath) {
+                Copy-Item -Path $knownLogPath -Destination (Join-Path $env:ARTIFACT_DIR "napview_log_temp.log") -Force -ErrorAction SilentlyContinue
+              }
+              $knownConfigPath = Join-Path $appDataRoot "data\config.json"
+              if (Test-Path -Path $knownConfigPath) {
+                Copy-Item -Path $knownConfigPath -Destination (Join-Path $env:ARTIFACT_DIR "napview_config.json") -Force -ErrorAction SilentlyContinue
+              }
               Get-ChildItem -Path $appDataRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq ".log" } | ForEach-Object {
                 $safeName = $_.FullName.Replace(":", "").Replace("\\", "_")
                 Copy-Item -Path $_.FullName -Destination (Join-Path $env:ARTIFACT_DIR "copied_log_$safeName") -Force -ErrorAction SilentlyContinue

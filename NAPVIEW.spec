@@ -6,7 +6,6 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 mne_datas = collect_data_files("mne", include_py_files=True)
 mne_hiddenimports = collect_submodules("mne")
 
-vc_redist_binaries = [(f, ".") for f in glob.glob("nidra/nidra/NIDRA/dll/*.dll")]
 lsl_binaries = [(f, "napview/libs") for f in glob.glob("napview/libs/*")]
 
 final_datas = [
@@ -26,7 +25,7 @@ final_hiddenimports = [
 a = Analysis(
     ["napview/napview.py"],
     pathex=[".", "napview", "nidra/nidra"],
-    binaries=vc_redist_binaries + lsl_binaries,
+    binaries=lsl_binaries,
     datas=final_datas,
     hiddenimports=final_hiddenimports,
     hookspath=[],
@@ -48,7 +47,7 @@ exe = EXE(
     name="NAPVIEW",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,
+    strip=False,
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
@@ -66,7 +65,7 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=True,
+    strip=False,
     upx=False,
     name="NAPVIEW",
     bindir="runtime",
