@@ -6,3 +6,5 @@
 - 2026-02-24: Starting next automated cycle.
 - 2026-02-24: Run `22365435477` canceled while stuck in `Download NIDRA model files`; no app-launch diagnostics produced.
 - 2026-02-24: Added deterministic NIDRA download logging (`nidra_download.log`), per-file timeout, SHA256/size logging, early artifact-dir preparation, and meaningful workflow `run-name`.
+- 2026-02-24: Run `22365676316` canceled during NIDRA download after instrumentation: file 1 completed (`ez6.onnx`, 12,224,923 bytes, 17.26s), file 2 started (`ez6moe.onnx`) but run was canceled before completion.
+- 2026-02-24: Next step is an uncanceled run with current workflow to reach the Napview launch stage and validate localhost detection fixes.
