@@ -1,11 +1,17 @@
 name: Windows PyInstaller Firefox Push Smoke
-run-name: Windows PyInstaller Firefox Push Smoke | ${{ github.ref_name }} | ${{ github.event_name }} | ${{ github.sha }}
+run-name: >-
+  ${{ github.event_name == 'push' && github.event.head_commit.message || github.event.inputs.change_summary || github.event_name }} | Windows PyInstaller Firefox Push Smoke | ${{ github.ref_name }}
 
 on:
   push:
     branches:
       - dev
   workflow_dispatch:
+    inputs:
+      change_summary:
+        description: Descriptive run label when manually dispatching this workflow
+        required: false
+        default: manual dispatch
 
 concurrency:
   group: windows-pyinstaller-firefox-push-${{ github.ref }}
@@ -89,7 +95,28 @@ jobs:
           Set-Location -Path $env:REPO_ROOT
           if (Test-Path -Path build) { Remove-Item -Recurse -Force build }
           if (Test-Path -Path dist) { Remove-Item -Recurse -Force dist }
-          python -m PyInstaller NAPVIEW.spec
+          $specPath = Join-Path $env:REPO_ROOT "NAPVIEW.spec"
+          $consoleSpecPath = Join-Path $env:REPO_ROOT "NAPVIEW.ci_console.spec"
+          $specContent = Get-Content -Path $specPath -Raw
+          if (-not $specContent.Contains("console=False")) {
+            throw "Expected 'console=False' in NAPVIEW.spec for CI console override"
+          }
+          $consoleSpecContent = $specContent.Replace("console=False", "console=True")
+          Set-Content -Path $consoleSpecPath -Value $consoleSpecContent -Encoding utf8
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "pyinstaller_build_mode.txt") -Value "CI override: console=True using NAPVIEW.ci_console.spec" -Encoding utf8
+          python -m PyInstaller $consoleSpecPath
+          if (Test-Path -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\warn-NAPVIEW.txt")) {
+            Copy-Item -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\warn-NAPVIEW.txt") -Destination (Join-Path $env:ARTIFACT_DIR "warn-NAPVIEW.txt") -Force
+          }
+          if (Test-Path -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\xref-NAPVIEW.html")) {
+            Copy-Item -Path (Join-Path $env:REPO_ROOT "build\NAPVIEW\xref-NAPVIEW.html") -Destination (Join-Path $env:ARTIFACT_DIR "xref-NAPVIEW.html") -Force
+          }
+          if (Test-Path -Path (Join-Path $env:REPO_ROOT "dist")) {
+            Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Recurse -Force |
+              Select-Object FullName, Length, LastWriteTime |
+              Format-Table -AutoSize |
+              Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "dist_tree.txt") -Encoding utf8
+          }
 
       - name: Run package, click Start napview, wait 2 minutes, screenshot
         run: |
@@ -103,6 +130,8 @@ jobs:
           $debugLogPath = Join-Path $env:ARTIFACT_DIR "runner_debug.log"
           $probeLogPath = Join-Path $env:ARTIFACT_DIR "probe_attempts.log"
           $transcriptPath = Join-Path $env:ARTIFACT_DIR "runner_transcript.log"
+          $sourceStdoutPath = Join-Path $env:ARTIFACT_DIR "source_probe_stdout.log"
+          $sourceStderrPath = Join-Path $env:ARTIFACT_DIR "source_probe_stderr.log"
           Start-Transcript -Path $transcriptPath -Force | Out-Null
 
           function Write-DebugLine {
@@ -137,6 +166,171 @@ jobs:
             return @($ports | Sort-Object -Unique)
           }
 
+          function Wait-ForNapviewWebUi {
+            param(
+              [System.Diagnostics.Process]$Process,
+              [string]$Label,
+              [int]$TimeoutMinutes,
+              [string[]]$TargetHosts,
+              [string]$ProbeLogPath
+            )
+
+            $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+            $attempt = 0
+
+            while ((Get-Date) -lt $deadline) {
+              $attempt += 1
+              if ($Process.HasExited) {
+                throw "$Label process exited early with code $($Process.ExitCode)"
+              }
+
+              $candidatePorts = New-Object System.Collections.Generic.List[int]
+              foreach ($p in 8145..8205) {
+                $candidatePorts.Add([int]$p)
+              }
+              foreach ($p in (Get-ProcessOwnedListeningPorts -ProcessId $Process.Id)) {
+                if (-not $candidatePorts.Contains([int]$p)) {
+                  $candidatePorts.Add([int]$p)
+                }
+              }
+
+              $portList = @($candidatePorts | Sort-Object -Unique)
+              $attemptHeader = "probe_label=$Label attempt=$attempt pid=$($Process.Id) candidate_ports=$($portList -join ',')"
+              Write-DebugLine $attemptHeader
+              Add-Content -Path $ProbeLogPath -Value "$(Get-Date -Format o) $attemptHeader"
+
+              foreach ($port in $portList) {
+                foreach ($targetHost in $TargetHosts) {
+                  $uri = "http://${targetHost}:$port/"
+                  try {
+                    $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 1 -Proxy $null
+                    $okLine = "probe_ok label=$Label uri=$uri status=$($response.StatusCode)"
+                    Write-DebugLine $okLine
+                    Add-Content -Path $ProbeLogPath -Value "$(Get-Date -Format o) $okLine"
+                    if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+                      return $uri
+                    }
+                  }
+                  catch {
+                    $msg = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
+                    $failLine = "probe_fail label=$Label uri=$uri error=$msg"
+                    Write-DebugLine $failLine
+                    Add-Content -Path $ProbeLogPath -Value "$(Get-Date -Format o) $failLine"
+                  }
+                }
+              }
+
+              Start-Sleep -Seconds 2
+            }
+
+            throw "Timed out waiting for $Label web UI. Hosts tested: $($TargetHosts -join ', '). Ports tested: 8145-8205 + process-owned listening ports"
+          }
+
+          function Get-WindowDetailsForProcess {
+            param([int]$ProcessId)
+
+            if (-not ([System.Management.Automation.PSTypeName]"NapviewWin32Window").Type) {
+              Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+public static class NapviewWin32Window
+{
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+}
+"@
+            }
+
+            $results = New-Object System.Collections.Generic.List[object]
+            $callback = [NapviewWin32Window+EnumWindowsProc]{
+              param([IntPtr]$hWnd, [IntPtr]$lParam)
+
+              $pid = [uint32]0
+              [void][NapviewWin32Window]::GetWindowThreadProcessId($hWnd, [ref]$pid)
+              if ($pid -eq [uint32]$ProcessId) {
+                $titleBuilder = New-Object System.Text.StringBuilder 1024
+                [void][NapviewWin32Window]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
+                $classBuilder = New-Object System.Text.StringBuilder 256
+                [void][NapviewWin32Window]::GetClassName($hWnd, $classBuilder, $classBuilder.Capacity)
+                $results.Add([pscustomobject]@{
+                  handle = ("0x{0:X}" -f $hWnd.ToInt64())
+                  title = $titleBuilder.ToString()
+                  class_name = $classBuilder.ToString()
+                  visible = [bool][NapviewWin32Window]::IsWindowVisible($hWnd)
+                }) | Out-Null
+              }
+
+              return $true
+            }
+
+            [void][NapviewWin32Window]::EnumWindows($callback, [IntPtr]::Zero)
+            return @($results)
+          }
+
+          function Capture-DesktopScreenshot {
+            param([string]$OutputPath)
+            try {
+              Add-Type -AssemblyName System.Windows.Forms
+              Add-Type -AssemblyName System.Drawing
+              $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+              if ($bounds.Width -le 0 -or $bounds.Height -le 0) {
+                throw "Virtual screen has invalid bounds: $bounds"
+              }
+              $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)
+              $bitmap.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+              $graphics.Dispose()
+              $bitmap.Dispose()
+              Write-DebugLine "desktop_capture_saved=$OutputPath"
+            }
+            catch {
+              Write-DebugLine "desktop_capture_failed=$($_.Exception.Message)"
+            }
+          }
+
+          function Export-RelevantEventLogs {
+            param(
+              [datetime]$StartTime,
+              [string]$JsonPath,
+              [string]$TextPath
+            )
+            try {
+              $providers = @("Application Error", "Windows Error Reporting", "SideBySide", ".NET Runtime")
+              $events = Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $StartTime } -ErrorAction Stop |
+                Where-Object { $providers -contains $_.ProviderName } |
+                Select-Object TimeCreated, Id, LevelDisplayName, ProviderName, Message
+              if ($events) {
+                $events | ConvertTo-Json -Depth 6 | Set-Content -Path $JsonPath -Encoding utf8
+                $events | Format-List | Out-File -FilePath $TextPath -Encoding utf8
+              }
+              else {
+                "[]" | Set-Content -Path $JsonPath -Encoding utf8
+                Set-Content -Path $TextPath -Value "No matching Application log events found in selected window." -Encoding utf8
+              }
+            }
+            catch {
+              $msg = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
+              Write-DebugLine "event_log_export_failed=$msg"
+            }
+          }
+
           Get-ChildItem Env:* | Sort-Object Name | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "env_dump.txt") -Encoding utf8
           Write-DebugLine "pwd=$(Get-Location)"
           Write-DebugLine "python_version=$(python --version 2>&1)"
@@ -161,77 +355,48 @@ jobs:
 
           $stdoutPath = Join-Path $env:ARTIFACT_DIR "napview_stdout.log"
           $stderrPath = Join-Path $env:ARTIFACT_DIR "napview_stderr.log"
+          $targetHosts = @("127.0.0.1", "localhost", "[::1]")
+          $sourceProc = $null
 
           $env:NAPVIEW_NO_AUTO_BROWSER = "1"
           Set-Content -Path (Join-Path $env:ARTIFACT_DIR "auto_browser_env_value.txt") -Value $env:NAPVIEW_NO_AUTO_BROWSER -Encoding utf8
           Write-DebugLine "Set NAPVIEW_NO_AUTO_BROWSER=$($env:NAPVIEW_NO_AUTO_BROWSER)"
 
-          $proc = Start-Process -FilePath $exePath -WorkingDirectory (Split-Path -Path $exePath -Parent) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "process_pid.txt") -Value "$($proc.Id)" -Encoding utf8
-          Write-DebugLine "Started NAPVIEW PID=$($proc.Id)"
+          $sourceProbeStatus = "NOT_RUN"
+          $sourceProbeError = ""
+          $sourceUrl = $null
+          try {
+            $sourceProc = Start-Process -FilePath "python" -ArgumentList "-m", "napview.napview" -WorkingDirectory $env:REPO_ROOT -PassThru -RedirectStandardOutput $sourceStdoutPath -RedirectStandardError $sourceStderrPath
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "source_process_pid.txt") -Value "$($sourceProc.Id)" -Encoding utf8
+            Write-DebugLine "Started source probe PID=$($sourceProc.Id)"
+            $sourceUrl = Wait-ForNapviewWebUi -Process $sourceProc -Label "source_probe" -TimeoutMinutes 2 -TargetHosts $targetHosts -ProbeLogPath $probeLogPath
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "source_detected_url.txt") -Value $sourceUrl -Encoding utf8
+            Write-DebugLine "source_probe_detected_url=$sourceUrl"
+            $sourceProbeStatus = "PASS"
+          }
+          catch {
+            $sourceProbeStatus = "FAIL"
+            $sourceProbeError = [string]$_.Exception.Message
+            $msg = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
+            Write-DebugLine "source_probe_exception=$msg"
+            ($_ | Out-String) | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "source_probe_exception.txt") -Encoding utf8
+          }
+          finally {
+            if ($sourceProc -and -not $sourceProc.HasExited) {
+              Stop-Process -Id $sourceProc.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
 
+          $proc = $null
           $url = $null
           $runnerError = $null
 
           try {
-            $targetHosts = @("127.0.0.1", "localhost")
-            $deadline = (Get-Date).AddMinutes(4)
-            $attempt = 0
+            $proc = Start-Process -FilePath $exePath -WorkingDirectory (Split-Path -Path $exePath -Parent) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "process_pid.txt") -Value "$($proc.Id)" -Encoding utf8
+            Write-DebugLine "Started NAPVIEW PID=$($proc.Id)"
 
-            while ((Get-Date) -lt $deadline -and -not $url) {
-              $attempt += 1
-              if ($proc.HasExited) {
-                throw "NAPVIEW process exited early with code $($proc.ExitCode)"
-              }
-
-              $candidatePorts = New-Object System.Collections.Generic.List[int]
-              foreach ($p in 8145..8205) {
-                $candidatePorts.Add([int]$p)
-              }
-              foreach ($p in (Get-ProcessOwnedListeningPorts -ProcessId $proc.Id)) {
-                if (-not $candidatePorts.Contains([int]$p)) {
-                  $candidatePorts.Add([int]$p)
-                }
-              }
-
-              $portList = @($candidatePorts | Sort-Object -Unique)
-              $attemptHeader = "attempt=$attempt pid=$($proc.Id) candidate_ports=$($portList -join ',')"
-              Write-DebugLine $attemptHeader
-              Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $attemptHeader"
-
-              foreach ($port in $portList) {
-                foreach ($targetHost in $targetHosts) {
-                  $uri = "http://${targetHost}:$port/"
-                  try {
-                    $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 1 -Proxy $null
-                    $okLine = "probe_ok uri=$uri status=$($response.StatusCode)"
-                    Write-DebugLine $okLine
-                    Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $okLine"
-                    if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
-                      $url = $uri
-                      break
-                    }
-                  }
-                  catch {
-                    $msg = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
-                    $failLine = "probe_fail uri=$uri error=$msg"
-                    Write-DebugLine $failLine
-                    Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $failLine"
-                  }
-                }
-                if ($url) {
-                  break
-                }
-              }
-
-              if (-not $url) {
-                Start-Sleep -Seconds 2
-              }
-            }
-
-            if (-not $url) {
-              throw "Timed out waiting for napview web UI. Hosts tested: 127.0.0.1, localhost. Ports tested: 8145-8205 + process-owned listening ports"
-            }
+            $url = Wait-ForNapviewWebUi -Process $proc -Label "packaged_exe" -TimeoutMinutes 4 -TargetHosts $targetHosts -ProbeLogPath $probeLogPath
 
             Write-DebugLine "Detected URL: $url"
             Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_url.txt") -Value $url -Encoding utf8
@@ -280,11 +445,31 @@ jobs:
             try { Get-Process | Sort-Object ProcessName | Format-Table -AutoSize Name, Id, CPU, WS, StartTime | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "process_snapshot.txt") -Encoding utf8 } catch {}
             try { netstat -ano | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "netstat_ano_final.txt") -Encoding utf8 } catch {}
             try {
+              if ($proc) {
+                $windowInfo = Get-WindowDetailsForProcess -ProcessId $proc.Id
+                ($windowInfo | ConvertTo-Json -Depth 8) | Set-Content -Path (Join-Path $env:ARTIFACT_DIR "napview_windows.json") -Encoding utf8
+                @($windowInfo | Select-Object -ExpandProperty title) | Set-Content -Path (Join-Path $env:ARTIFACT_DIR "napview_window_titles.txt") -Encoding utf8
+              }
+            } catch {}
+            try {
+              Export-RelevantEventLogs -StartTime (Get-Date).AddMinutes(-30) -JsonPath (Join-Path $env:ARTIFACT_DIR "windows_application_events.json") -TextPath (Join-Path $env:ARTIFACT_DIR "windows_application_events.txt")
+            } catch {}
+            if ($runnerError) {
+              Capture-DesktopScreenshot -OutputPath (Join-Path $env:ARTIFACT_DIR "desktop_on_failure.png")
+            }
+            try {
               $appDataRoot = Join-Path $env:LOCALAPPDATA "napview"
               Get-ChildItem -Path $appDataRoot -Recurse -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "napview_localappdata_files.txt") -Encoding utf8
               Get-ChildItem -Path $appDataRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq ".log" } | ForEach-Object {
                 $safeName = $_.FullName.Replace(":", "").Replace("\\", "_")
                 Copy-Item -Path $_.FullName -Destination (Join-Path $env:ARTIFACT_DIR "copied_log_$safeName") -Force -ErrorAction SilentlyContinue
+              }
+            } catch {}
+            try {
+              $crashDumpRoot = Join-Path $env:LOCALAPPDATA "CrashDumps"
+              Get-ChildItem -Path $crashDumpRoot -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "crash_dump_files.txt") -Encoding utf8
+              Get-ChildItem -Path $crashDumpRoot -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -lt 20971520 } | ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination (Join-Path $env:ARTIFACT_DIR "copied_crashdump_$($_.Name)") -Force -ErrorAction SilentlyContinue
               }
             } catch {}
 
@@ -295,6 +480,17 @@ jobs:
             $summary = [ordered]@{
               status = if ($runnerError) { "FAIL" } else { "PASS" }
               error = if ($runnerError) { [string]$runnerError.Exception.Message } else { "" }
+              source_probe = [ordered]@{
+                status = $sourceProbeStatus
+                error = $sourceProbeError
+                detected_url = $sourceUrl
+                process_pid = if ($sourceProc) { $sourceProc.Id } else { $null }
+              }
+              packaged_probe = [ordered]@{
+                detected_url = $url
+                process_pid = if ($proc) { $proc.Id } else { $null }
+              }
+              exe_path = $exePath
               detected_url = $url
               process_pid = if ($proc) { $proc.Id } else { $null }
             }
