@@ -1,0 +1,139 @@
+name: Windows PyInstaller Firefox Push Smoke
+
+on:
+  push:
+
+jobs:
+  pyinstaller-firefox-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    env:
+      REPO_ROOT: ${{ github.workspace }}
+      ARTIFACT_DIR: ${{ github.workspace }}\push-pyinstaller-firefox-artifacts
+      SCREENSHOT_PATH: ${{ github.workspace }}/push-pyinstaller-firefox-artifacts/napview_after_2min.png
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -Path $env:REPO_ROOT
+          python -m pip install --upgrade pip "setuptools<70.0.0"
+          python -m pip install pyinstaller playwright
+          python -m pip install .
+
+      - name: Install Playwright Firefox
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -Path $env:REPO_ROOT
+          python -m playwright install firefox
+
+      - name: Download NIDRA model files
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -Path $env:REPO_ROOT
+          New-Item -ItemType Directory -Force -Path nidra\nidra\NIDRA\models | Out-Null
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6.onnx -OutFile nidra\nidra\NIDRA\models\ez6.onnx
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6moe.onnx -OutFile nidra\nidra\NIDRA\models\ez6moe.onnx
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024.onnx -OutFile nidra\nidra\NIDRA\models\u-sleep-nsrr-2024.onnx
+          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024_eeg.onnx -OutFile nidra\nidra\NIDRA\models\u-sleep-nsrr-2024_eeg.onnx
+
+      - name: Build PyInstaller package
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -Path $env:REPO_ROOT
+          if (Test-Path -Path build) { Remove-Item -Recurse -Force build }
+          if (Test-Path -Path dist) { Remove-Item -Recurse -Force dist }
+          python -m PyInstaller NAPVIEW.spec
+
+      - name: Run package, click Start napview, wait 2 minutes, screenshot
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location -Path $env:REPO_ROOT
+          New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
+
+          $exePath = (Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Filter "NAPVIEW.exe" -Recurse | Select-Object -First 1).FullName
+          if (-not $exePath) {
+            throw "Could not find NAPVIEW.exe under dist"
+          }
+
+          $stdoutPath = Join-Path $env:ARTIFACT_DIR "napview_stdout.log"
+          $stderrPath = Join-Path $env:ARTIFACT_DIR "napview_stderr.log"
+          $proc = Start-Process -FilePath $exePath -WorkingDirectory (Split-Path -Path $exePath -Parent) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+
+          try {
+            $url = $null
+            $deadline = (Get-Date).AddMinutes(4)
+            while ((Get-Date) -lt $deadline -and -not $url) {
+              if ($proc.HasExited) {
+                throw "NAPVIEW process exited early with code $($proc.ExitCode)"
+              }
+              foreach ($port in 8145..8205) {
+                try {
+                  $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2
+                  if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                    $url = "http://127.0.0.1:$port/"
+                    break
+                  }
+                } catch {}
+              }
+              if (-not $url) {
+                Start-Sleep -Seconds 2
+              }
+            }
+
+            if (-not $url) {
+              throw "Timed out waiting for napview web UI on localhost ports 8145-8205"
+            }
+
+            Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_url.txt") -Value $url -Encoding utf8
+            $env:TEST_URL = $url
+
+            $py = @'
+            import os
+            from pathlib import Path
+
+            from playwright.sync_api import sync_playwright
+
+            url = os.environ["TEST_URL"]
+            screenshot_path = Path(os.environ["SCREENSHOT_PATH"])
+
+            with sync_playwright() as p:
+                browser = p.firefox.launch(headless=True)
+                page = browser.new_page(viewport={"width": 1366, "height": 768})
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_selector("#startButton:not([disabled])", timeout=120000)
+                page.click("#startButton")
+                page.wait_for_timeout(120000)
+                screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(screenshot_path), full_page=True)
+                browser.close()
+            '@
+            $py = $py -replace '(?m)^ {12}', ''
+            $py | python -
+          }
+          finally {
+            if ($proc -and -not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+            }
+          }
+
+      - name: Upload screenshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-pyinstaller-firefox-screenshot
+          path: ${{ github.workspace }}/push-pyinstaller-firefox-artifacts/napview_after_2min.png
+          if-no-files-found: error
+          retention-days: 7
