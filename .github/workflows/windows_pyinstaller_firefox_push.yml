@@ -164,7 +164,7 @@ jobs:
           $runnerError = $null
 
           try {
-            $hosts = @("127.0.0.1", "localhost", "[::1]")
+            $targetHosts = @("127.0.0.1", "localhost", "[::1]")
             $deadline = (Get-Date).AddMinutes(4)
             $attempt = 0
 
@@ -190,8 +190,8 @@ jobs:
               Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $attemptHeader"
 
               foreach ($port in $portList) {
-                foreach ($host in $hosts) {
-                  $uri = "http://$host`:$port/"
+                foreach ($targetHost in $targetHosts) {
+                  $uri = "http://${targetHost}:$port/"
                   try {
                     $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 2
                     $okLine = "probe_ok uri=$uri status=$($response.StatusCode)"
