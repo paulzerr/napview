@@ -4,3 +4,5 @@
 - 2026-02-24: Confirmed `NAPVIEW.exe` launched, but both redirected stdout/stderr logs were empty in artifact.
 - 2026-02-24: Applied workflow changes: `NAPVIEW_NO_AUTO_BROWSER=1`, host probing (`127.0.0.1`, `localhost`, `[::1]`), process-owned port discovery, and high-verbosity diagnostics (transcript, probe logs, netstat/tasklist/process snapshots, copied local app logs).
 - 2026-02-24: Starting next automated cycle.
+- 2026-02-24: Run `22365435477` canceled while stuck in `Download NIDRA model files`; no app-launch diagnostics produced.
+- 2026-02-24: Added deterministic NIDRA download logging (`nidra_download.log`), per-file timeout, SHA256/size logging, early artifact-dir preparation, and meaningful workflow `run-name`.

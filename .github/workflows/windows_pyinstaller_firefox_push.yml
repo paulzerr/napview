@@ -1,4 +1,5 @@
 name: Windows PyInstaller Firefox Push Smoke
+run-name: Windows PyInstaller Firefox Push Smoke | ${{ github.ref_name }} | ${{ github.event_name }} | ${{ github.sha }}
 
 on:
   push:
@@ -26,6 +27,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Prepare debug artifact directory
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "workflow_start.txt") -Value "$(Get-Date -Format o) workflow started" -Encoding utf8
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -49,12 +56,32 @@ jobs:
       - name: Download NIDRA model files
         run: |
           $ErrorActionPreference = "Stop"
+          $VerbosePreference = "Continue"
           Set-Location -Path $env:REPO_ROOT
           New-Item -ItemType Directory -Force -Path nidra\nidra\NIDRA\models | Out-Null
-          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6.onnx -OutFile nidra\nidra\NIDRA\models\ez6.onnx
-          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6moe.onnx -OutFile nidra\nidra\NIDRA\models\ez6moe.onnx
-          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024.onnx -OutFile nidra\nidra\NIDRA\models\u-sleep-nsrr-2024.onnx
-          Invoke-WebRequest -Uri https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024_eeg.onnx -OutFile nidra\nidra\NIDRA\models\u-sleep-nsrr-2024_eeg.onnx
+          $downloadLog = Join-Path $env:ARTIFACT_DIR "nidra_download.log"
+          $downloads = @(
+            @{ Uri = "https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6.onnx"; OutFile = "nidra\nidra\NIDRA\models\ez6.onnx" },
+            @{ Uri = "https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6moe.onnx"; OutFile = "nidra\nidra\NIDRA\models\ez6moe.onnx" },
+            @{ Uri = "https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024.onnx"; OutFile = "nidra\nidra\NIDRA\models\u-sleep-nsrr-2024.onnx" },
+            @{ Uri = "https://huggingface.co/pzerr/NIDRA_models/resolve/main/u-sleep-nsrr-2024_eeg.onnx"; OutFile = "nidra\nidra\NIDRA\models\u-sleep-nsrr-2024_eeg.onnx" }
+          )
+
+          $index = 0
+          foreach ($item in $downloads) {
+            $index += 1
+            $startTs = Get-Date
+            $startLine = "$(Get-Date -Format o) download_start index=$index uri=$($item.Uri) out=$($item.OutFile)"
+            $startLine | Tee-Object -FilePath $downloadLog -Append
+
+            Invoke-WebRequest -Uri $item.Uri -OutFile $item.OutFile -TimeoutSec 600 -MaximumRedirection 5
+
+            $fileInfo = Get-Item -Path $item.OutFile
+            $hash = (Get-FileHash -Path $item.OutFile -Algorithm SHA256).Hash
+            $seconds = [math]::Round(((Get-Date) - $startTs).TotalSeconds, 2)
+            $doneLine = "$(Get-Date -Format o) download_done index=$index seconds=$seconds bytes=$($fileInfo.Length) sha256=$hash"
+            $doneLine | Tee-Object -FilePath $downloadLog -Append
+          }
 
       - name: Build PyInstaller package
         run: |
