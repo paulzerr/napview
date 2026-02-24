@@ -67,43 +67,136 @@ jobs:
       - name: Run package, click Start napview, wait 2 minutes, screenshot
         run: |
           $ErrorActionPreference = "Stop"
+          $VerbosePreference = "Continue"
+          $DebugPreference = "Continue"
+          $InformationPreference = "Continue"
           Set-Location -Path $env:REPO_ROOT
           New-Item -ItemType Directory -Force -Path $env:ARTIFACT_DIR | Out-Null
+
+          $debugLogPath = Join-Path $env:ARTIFACT_DIR "runner_debug.log"
+          $probeLogPath = Join-Path $env:ARTIFACT_DIR "probe_attempts.log"
+          $transcriptPath = Join-Path $env:ARTIFACT_DIR "runner_transcript.log"
+          Start-Transcript -Path $transcriptPath -Force | Out-Null
+
+          function Write-DebugLine {
+            param([string]$Message)
+            $line = "$(Get-Date -Format o) $Message"
+            $line | Tee-Object -FilePath $debugLogPath -Append
+          }
+
+          function Get-ProcessOwnedListeningPorts {
+            param([int]$ProcessId)
+            $ports = @()
+            try {
+              $ports += @(Get-NetTCPConnection -State Listen -OwningProcess $ProcessId -ErrorAction Stop | Select-Object -ExpandProperty LocalPort)
+            }
+            catch {
+              Write-DebugLine "Get-NetTCPConnection failed for PID $ProcessId: $($_.Exception.Message)"
+            }
+
+            try {
+              $netstatRawPath = Join-Path $env:ARTIFACT_DIR "netstat_probe_latest.txt"
+              netstat -ano | Tee-Object -FilePath $netstatRawPath | Out-Null
+              foreach ($line in Get-Content -Path $netstatRawPath) {
+                if ($line -match "^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+$ProcessId\s*$") {
+                  $ports += [int]$Matches[1]
+                }
+              }
+            }
+            catch {
+              Write-DebugLine "netstat parse failed for PID $ProcessId: $($_.Exception.Message)"
+            }
+
+            return @($ports | Sort-Object -Unique)
+          }
+
+          Get-ChildItem Env:* | Sort-Object Name | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "env_dump.txt") -Encoding utf8
+          Write-DebugLine "pwd=$(Get-Location)"
+          Write-DebugLine "python_version=$(python --version 2>&1)"
+          Write-DebugLine "powershell_version=$($PSVersionTable.PSVersion)"
+          Write-DebugLine "runner_os=$([Environment]::OSVersion.VersionString)"
 
           $exePath = (Get-ChildItem -Path (Join-Path $env:REPO_ROOT "dist") -Filter "NAPVIEW.exe" -Recurse | Select-Object -First 1).FullName
           if (-not $exePath) {
             throw "Could not find NAPVIEW.exe under dist"
           }
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "exe_path.txt") -Value $exePath -Encoding utf8
 
           $stdoutPath = Join-Path $env:ARTIFACT_DIR "napview_stdout.log"
           $stderrPath = Join-Path $env:ARTIFACT_DIR "napview_stderr.log"
+
+          $env:NAPVIEW_NO_AUTO_BROWSER = "1"
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "auto_browser_env_value.txt") -Value $env:NAPVIEW_NO_AUTO_BROWSER -Encoding utf8
+          Write-DebugLine "Set NAPVIEW_NO_AUTO_BROWSER=$($env:NAPVIEW_NO_AUTO_BROWSER)"
+
           $proc = Start-Process -FilePath $exePath -WorkingDirectory (Split-Path -Path $exePath -Parent) -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+          Set-Content -Path (Join-Path $env:ARTIFACT_DIR "process_pid.txt") -Value "$($proc.Id)" -Encoding utf8
+          Write-DebugLine "Started NAPVIEW PID=$($proc.Id)"
+
+          $url = $null
+          $runnerError = $null
 
           try {
-            $url = $null
+            $hosts = @("127.0.0.1", "localhost", "[::1]")
             $deadline = (Get-Date).AddMinutes(4)
+            $attempt = 0
+
             while ((Get-Date) -lt $deadline -and -not $url) {
+              $attempt += 1
               if ($proc.HasExited) {
                 throw "NAPVIEW process exited early with code $($proc.ExitCode)"
               }
-              foreach ($port in 8145..8205) {
-                try {
-                  $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2
-                  if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
-                    $url = "http://127.0.0.1:$port/"
-                    break
-                  }
-                } catch {}
+
+              $candidatePorts = New-Object System.Collections.Generic.List[int]
+              foreach ($p in 8145..8205) {
+                $candidatePorts.Add([int]$p)
               }
+              foreach ($p in (Get-ProcessOwnedListeningPorts -ProcessId $proc.Id)) {
+                if (-not $candidatePorts.Contains([int]$p)) {
+                  $candidatePorts.Add([int]$p)
+                }
+              }
+
+              $portList = @($candidatePorts | Sort-Object -Unique)
+              $attemptHeader = "attempt=$attempt pid=$($proc.Id) candidate_ports=$($portList -join ',')"
+              Write-DebugLine $attemptHeader
+              Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $attemptHeader"
+
+              foreach ($port in $portList) {
+                foreach ($host in $hosts) {
+                  $uri = "http://$host`:$port/"
+                  try {
+                    $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 2
+                    $okLine = "probe_ok uri=$uri status=$($response.StatusCode)"
+                    Write-DebugLine $okLine
+                    Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $okLine"
+                    if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
+                      $url = $uri
+                      break
+                    }
+                  }
+                  catch {
+                    $msg = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
+                    $failLine = "probe_fail uri=$uri error=$msg"
+                    Write-DebugLine $failLine
+                    Add-Content -Path $probeLogPath -Value "$(Get-Date -Format o) $failLine"
+                  }
+                }
+                if ($url) {
+                  break
+                }
+              }
+
               if (-not $url) {
                 Start-Sleep -Seconds 2
               }
             }
 
             if (-not $url) {
-              throw "Timed out waiting for napview web UI on localhost ports 8145-8205"
+              throw "Timed out waiting for napview web UI. Hosts tested: 127.0.0.1, localhost, [::1]. Ports tested: 8145-8205 + process-owned listening ports"
             }
 
+            Write-DebugLine "Detected URL: $url"
             Set-Content -Path (Join-Path $env:ARTIFACT_DIR "detected_url.txt") -Value $url -Encoding utf8
             $env:TEST_URL = $url
 
@@ -138,10 +231,42 @@ jobs:
             Set-Content -Path $pythonPath -Value ($pythonLines -join "`n") -Encoding utf8
             python $pythonPath
           }
+          catch {
+            $runnerError = $_
+            $msg = $_.Exception.Message.Replace("`r", " ").Replace("`n", " ")
+            Write-DebugLine "run_exception=$msg"
+            ($_ | Out-String) | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "run_exception.txt") -Encoding utf8
+          }
           finally {
+            Write-DebugLine "Collecting diagnostics in finally"
+            try { tasklist /v | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "tasklist_v.txt") -Encoding utf8 } catch {}
+            try { Get-Process | Sort-Object ProcessName | Format-Table -AutoSize Name, Id, CPU, WS, StartTime | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "process_snapshot.txt") -Encoding utf8 } catch {}
+            try { netstat -ano | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "netstat_ano_final.txt") -Encoding utf8 } catch {}
+            try {
+              $appDataRoot = Join-Path $env:LOCALAPPDATA "napview"
+              Get-ChildItem -Path $appDataRoot -Recurse -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName | Out-File -FilePath (Join-Path $env:ARTIFACT_DIR "napview_localappdata_files.txt") -Encoding utf8
+              Get-ChildItem -Path $appDataRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq ".log" } | ForEach-Object {
+                $safeName = $_.FullName.Replace(":", "").Replace("\\", "_")
+                Copy-Item -Path $_.FullName -Destination (Join-Path $env:ARTIFACT_DIR "copied_log_$safeName") -Force -ErrorAction SilentlyContinue
+              }
+            } catch {}
+
             if ($proc -and -not $proc.HasExited) {
-              Stop-Process -Id $proc.Id -Force
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             }
+
+            $summary = [ordered]@{
+              status = if ($runnerError) { "FAIL" } else { "PASS" }
+              error = if ($runnerError) { [string]$runnerError.Exception.Message } else { "" }
+              detected_url = $url
+              process_pid = if ($proc) { $proc.Id } else { $null }
+            }
+            ($summary | ConvertTo-Json -Depth 8) | Set-Content -Path (Join-Path $env:ARTIFACT_DIR "run_summary.json") -Encoding utf8
+            try { Stop-Transcript | Out-Null } catch {}
+          }
+
+          if ($runnerError) {
+            throw $runnerError
           }
 
       - name: Upload debug artifact
