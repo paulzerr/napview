@@ -27,6 +27,7 @@ if (Test-Path -Path $zipPath) {
 
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+New-Item -ItemType Directory -Path $pythonRoot -Force | Out-Null
 
 $nugetUrl = "https://www.nuget.org/api/v2/package/python/$PythonVersion"
 $nupkgPath = Join-Path $buildRoot "python.$PythonVersion.nupkg"
@@ -35,25 +36,35 @@ $nugetExtractPath = Join-Path $buildRoot "python_nuget_extract"
 
 Write-Host "Downloading Python runtime from: $nugetUrl"
 Invoke-WebRequest -Uri $nugetUrl -OutFile $nupkgPath -TimeoutSec 900 -MaximumRedirection 5
-Copy-Item -Path $nupkgPath -Destination $nugetZipPath -Force
-Expand-Archive -Path $nugetZipPath -DestinationPath $nugetExtractPath -Force
+$nupkgFile = Get-Item -LiteralPath $nupkgPath
+if ($nupkgFile.Length -le 0) {
+    throw "Downloaded NuGet package is empty: $nupkgPath"
+}
+Copy-Item -LiteralPath $nupkgPath -Destination $nugetZipPath -Force
+Expand-Archive -LiteralPath $nugetZipPath -DestinationPath $nugetExtractPath -Force
 
 $nugetPythonExe = Join-Path $nugetExtractPath "tools\python.exe"
 if (-not (Test-Path -Path $nugetPythonExe)) {
     throw "Python runtime not found in NuGet package at $nugetPythonExe"
 }
 
-Copy-Item -Path (Join-Path $nugetExtractPath "tools\*") -Destination $pythonRoot -Recurse -Force
+$nugetToolsDir = Join-Path $nugetExtractPath "tools"
+if (-not (Test-Path -LiteralPath $nugetToolsDir)) {
+    throw "NuGet tools directory not found at $nugetToolsDir"
+}
+Get-ChildItem -LiteralPath $nugetToolsDir -Force | Copy-Item -Destination $pythonRoot -Recurse -Force
 $pythonExe = Join-Path $pythonRoot "python.exe"
+if (-not (Test-Path -LiteralPath $pythonExe)) {
+    throw "Copied Python runtime missing executable at $pythonExe"
+}
 
 Write-Host "Bootstrapping pip"
 & $pythonExe -m ensurepip --upgrade
 & $pythonExe -m pip install --upgrade pip "setuptools<70.0.0" wheel
 
 Write-Host "Installing napview and dependencies"
-Push-Location -Path $RepoRoot
-& $pythonExe -m pip install .
-Pop-Location
+& $pythonExe -m pip install $RepoRoot
+& $pythonExe -m pip check
 
 $resourceCheck = @'
 from napview.helpers import get_resource_root
@@ -67,16 +78,30 @@ print(root)
 
 Write-Host "Validating packaged assets"
 $resourceRootPath = (& $pythonExe -c $resourceCheck).Trim()
-Set-Content -Path (Join-Path $packageRoot "resource_root.txt") -Value $resourceRootPath -Encoding ascii
+if ([string]::IsNullOrWhiteSpace($resourceRootPath) -or -not (Test-Path -LiteralPath $resourceRootPath)) {
+    throw "Invalid resource root path returned by runtime: '$resourceRootPath'"
+}
+$packageRootFullPath = [System.IO.Path]::GetFullPath($packageRoot)
+$resourceRootFullPath = [System.IO.Path]::GetFullPath($resourceRootPath)
+if (-not $resourceRootFullPath.StartsWith($packageRootFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Resource root resolved outside package root: $resourceRootFullPath"
+}
+$resourceRootRelativePath = $resourceRootFullPath.Substring($packageRootFullPath.Length).TrimStart('\', '/')
+Set-Content -LiteralPath (Join-Path $packageRoot "resource_root.txt") -Value $resourceRootPath -Encoding utf8
 
 $nidraModelsDir = (& $pythonExe -c "import pathlib, NIDRA; print(pathlib.Path(NIDRA.__file__).resolve().parent / 'models')").Trim()
 if ([string]::IsNullOrWhiteSpace($nidraModelsDir)) {
     throw "Could not resolve NIDRA models directory"
 }
+$pythonRootFullPath = [System.IO.Path]::GetFullPath($pythonRoot)
+$nidraModelsFullPath = [System.IO.Path]::GetFullPath($nidraModelsDir)
+if (-not $nidraModelsFullPath.StartsWith($pythonRootFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "NIDRA models directory resolved outside bundled runtime: $nidraModelsFullPath"
+}
 
 Write-Host "Downloading NIDRA models to: $nidraModelsDir"
 New-Item -ItemType Directory -Path $nidraModelsDir -Force | Out-Null
-Set-Content -Path $modelsLogPath -Value "model`tsize_bytes`tsha256" -Encoding ascii
+Set-Content -LiteralPath $modelsLogPath -Value "model`tsize_bytes`tsha256" -Encoding utf8
 
 $modelDownloads = @(
     @{ Uri = "https://huggingface.co/pzerr/NIDRA_models/resolve/main/ez6.onnx"; Name = "ez6.onnx" },
@@ -89,9 +114,12 @@ foreach ($model in $modelDownloads) {
     $targetPath = Join-Path $nidraModelsDir $model.Name
     Write-Host "Downloading model: $($model.Name)"
     Invoke-WebRequest -Uri $model.Uri -OutFile $targetPath -TimeoutSec 900 -MaximumRedirection 5
-    $fileInfo = Get-Item -Path $targetPath
-    $hash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash
-    "$($model.Name)`t$($fileInfo.Length)`t$hash" | Add-Content -Path $modelsLogPath -Encoding ascii
+    $fileInfo = Get-Item -LiteralPath $targetPath
+    if ($fileInfo.Length -le 0) {
+        throw "Downloaded model is empty: $targetPath"
+    }
+    $hash = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash
+    "$($model.Name)`t$($fileInfo.Length)`t$hash" | Add-Content -LiteralPath $modelsLogPath -Encoding utf8
 }
 
 Write-Host "Writing launcher"
@@ -104,7 +132,7 @@ set "PYTHONUTF8=1"
 set "PYTHONDONTWRITEBYTECODE=1"
 "%ROOT%python\python.exe" -m napview.napview %*
 exit /b %ERRORLEVEL%
-"@ | Set-Content -Path $launcherPath -Encoding ascii
+"@ | Set-Content -LiteralPath $launcherPath -Encoding ascii
 
 @"
 NAPVIEW portable Windows package
@@ -116,22 +144,22 @@ NAPVIEW portable Windows package
 Notes
 - Runtime source: CPython NuGet package version $PythonVersion.
 - Includes NIDRA model files for offline-restricted environments.
-"@ | Set-Content -Path (Join-Path $packageRoot "README_portable.txt") -Encoding ascii
+"@ | Set-Content -LiteralPath (Join-Path $packageRoot "README_portable.txt") -Encoding utf8
 
 Write-Host "Recording build metadata"
-& $pythonExe -m pip freeze | Set-Content -Path (Join-Path $packageRoot "requirements.freeze.txt") -Encoding ascii
+& $pythonExe -m pip freeze | Set-Content -LiteralPath (Join-Path $packageRoot "requirements.freeze.txt") -Encoding utf8
 
 $buildInfo = [ordered]@{
     built_at_utc = (Get-Date).ToUniversalTime().ToString("o")
     package_name = $PackageName
     python_nuget_version = $PythonVersion
-    zip_path = $zipPath
-    resource_root = $resourceRootPath
+    zip_path = "dist/$PackageName.zip"
+    resource_root = "portable_windows_build/$PackageName/$resourceRootRelativePath"
 }
-$buildInfo | ConvertTo-Json | Set-Content -Path (Join-Path $packageRoot "build_info.json") -Encoding ascii
+$buildInfo | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageRoot "build_info.json") -Encoding utf8
 
 Write-Host "Creating zip: $zipPath"
-Compress-Archive -Path $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 
-$zipFile = Get-Item -Path $zipPath
+$zipFile = Get-Item -LiteralPath $zipPath
 Write-Host "Portable zip created: $($zipFile.FullName) ($([math]::Round($zipFile.Length / 1MB, 2)) MB)"
