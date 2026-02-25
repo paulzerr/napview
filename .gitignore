@@ -44,3 +44,5 @@ sfx_config.txt
 nidra/nidra/NIDRA/models/
 nidra/
 AGENTS.md
+scripts/
+matrix-artifacts/
