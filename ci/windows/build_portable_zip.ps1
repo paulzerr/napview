@@ -66,20 +66,43 @@ Write-Host "Installing napview and dependencies"
 & $pythonExe -m pip install $RepoRoot
 & $pythonExe -m pip check
 
-$resourceCheck = @'
+$runtimeProbeScriptPath = Join-Path $buildRoot "probe_runtime_paths.py"
+@'
+import json
+from pathlib import Path
+import NIDRA
 from napview.helpers import get_resource_root
-root = get_resource_root()
-required = ["assets", "templates", "static", "libs", "CONFIG_DEFAULTS.txt"]
-missing = [entry for entry in required if not (root / entry).exists()]
-if missing:
-    raise SystemExit(f"Missing packaged assets: {missing} at {root}")
-print(root)
-'@
+
+payload = {
+    "resource_root": str(Path(get_resource_root()).resolve()),
+    "nidra_models_dir": str((Path(NIDRA.__file__).resolve().parent / "models").resolve()),
+}
+print(json.dumps(payload))
+'@ | Set-Content -LiteralPath $runtimeProbeScriptPath -Encoding ascii
 
 Write-Host "Validating packaged assets"
-$resourceRootPath = (& $pythonExe -c $resourceCheck).Trim()
+$runtimeProbeOutput = & $pythonExe $runtimeProbeScriptPath
+$runtimeProbeJson = [string]($runtimeProbeOutput | Select-Object -Last 1)
+if ([string]::IsNullOrWhiteSpace($runtimeProbeJson)) {
+    throw "Runtime probe returned no JSON output"
+}
+if (-not $runtimeProbeJson.TrimStart().StartsWith("{")) {
+    throw "Runtime probe did not return JSON on last line: $runtimeProbeJson"
+}
+$runtimeProbe = $runtimeProbeJson | ConvertFrom-Json
+$resourceRootPath = [string]$runtimeProbe.resource_root
 if ([string]::IsNullOrWhiteSpace($resourceRootPath) -or -not (Test-Path -LiteralPath $resourceRootPath)) {
     throw "Invalid resource root path returned by runtime: '$resourceRootPath'"
+}
+$requiredResourceEntries = @("assets", "templates", "static", "libs", "CONFIG_DEFAULTS.txt")
+$missingResourceEntries = @()
+foreach ($entry in $requiredResourceEntries) {
+    if (-not (Test-Path -LiteralPath (Join-Path $resourceRootPath $entry))) {
+        $missingResourceEntries += $entry
+    }
+}
+if ($missingResourceEntries.Count -gt 0) {
+    throw "Missing packaged assets: $($missingResourceEntries -join ', ') at $resourceRootPath"
 }
 $packageRootFullPath = [System.IO.Path]::GetFullPath($packageRoot)
 $resourceRootFullPath = [System.IO.Path]::GetFullPath($resourceRootPath)
@@ -89,7 +112,7 @@ if (-not $resourceRootFullPath.StartsWith($packageRootFullPath, [System.StringCo
 $resourceRootRelativePath = $resourceRootFullPath.Substring($packageRootFullPath.Length).TrimStart('\', '/')
 Set-Content -LiteralPath (Join-Path $packageRoot "resource_root.txt") -Value $resourceRootPath -Encoding utf8
 
-$nidraModelsDir = (& $pythonExe -c "import pathlib, NIDRA; print(pathlib.Path(NIDRA.__file__).resolve().parent / 'models')").Trim()
+$nidraModelsDir = [string]$runtimeProbe.nidra_models_dir
 if ([string]::IsNullOrWhiteSpace($nidraModelsDir)) {
     throw "Could not resolve NIDRA models directory"
 }
