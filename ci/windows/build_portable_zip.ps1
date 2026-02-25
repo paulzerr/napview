@@ -30,11 +30,13 @@ New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 
 $nugetUrl = "https://www.nuget.org/api/v2/package/python/$PythonVersion"
 $nupkgPath = Join-Path $buildRoot "python.$PythonVersion.nupkg"
+$nugetZipPath = Join-Path $buildRoot "python.$PythonVersion.zip"
 $nugetExtractPath = Join-Path $buildRoot "python_nuget_extract"
 
 Write-Host "Downloading Python runtime from: $nugetUrl"
 Invoke-WebRequest -Uri $nugetUrl -OutFile $nupkgPath -TimeoutSec 900 -MaximumRedirection 5
-Expand-Archive -Path $nupkgPath -DestinationPath $nugetExtractPath -Force
+Copy-Item -Path $nupkgPath -Destination $nugetZipPath -Force
+Expand-Archive -Path $nugetZipPath -DestinationPath $nugetExtractPath -Force
 
 $nugetPythonExe = Join-Path $nugetExtractPath "tools\python.exe"
 if (-not (Test-Path -Path $nugetPythonExe)) {
@@ -133,4 +135,3 @@ Compress-Archive -Path $packageRoot -DestinationPath $zipPath -CompressionLevel 
 
 $zipFile = Get-Item -Path $zipPath
 Write-Host "Portable zip created: $($zipFile.FullName) ($([math]::Round($zipFile.Length / 1MB, 2)) MB)"
-

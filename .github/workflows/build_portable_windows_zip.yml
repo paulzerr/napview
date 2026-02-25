@@ -1,6 +1,7 @@
 name: NAPVIEW Build Portable Windows ZIP
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       python_runtime_version:
@@ -40,4 +41,3 @@ jobs:
             ${{ github.workspace }}\dist\portable_windows_build\NAPVIEW_portable_win64\requirements.freeze.txt
             ${{ github.workspace }}\dist\portable_windows_build\NAPVIEW_portable_win64\NIDRA_models.sha256.tsv
           if-no-files-found: error
-
