@@ -26,17 +26,16 @@ Optional input:
 From repository root:
 
 ```powershell
-.\ci\windows\build_portable_zip.ps1
+.\.github\workflows\build_portable_zip.ps1
 ```
 
 With explicit runtime version:
 
 ```powershell
-.\ci\windows\build_portable_zip.ps1 -PythonVersion 3.11.9
+.\.github\workflows\build_portable_zip.ps1 -PythonVersion 3.11.9
 ```
 
 ## Package usage (end users)
 
 1. Unzip `NAPVIEW_portable_win64.zip`
 2. Double-click `run_napview.bat`
-
