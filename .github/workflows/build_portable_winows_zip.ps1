@@ -144,7 +144,7 @@ foreach ($model in $modelDownloads) {
     $hash = (Get-FileHash -LiteralPath $targetPath -Algorithm SHA256).Hash
     "$($model.Name)`t$($fileInfo.Length)`t$hash" | Add-Content -LiteralPath $modelsLogPath -Encoding utf8
 }
-
+ 
 Write-Host "Writing launcher"
 $launcherPath = Join-Path $packageRoot "run_napview.bat"
 @"
