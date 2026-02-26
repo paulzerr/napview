@@ -17,13 +17,13 @@ on:
       publish_testpypi:
         description: Publish package to TestPyPI
         required: true
-        default: 'false'
+        default: 'true'
         type: choice
         options:
           - 'false'
           - 'true'
       testpypi_version:
-        description: Package version used only for TestPyPI publish
+        description: Base prerelease version for TestPyPI (0.1.1 or 0.1.1rc1)
         required: true
         default: 0.1.1rc1
         type: string
@@ -163,6 +163,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      SHOULD_PUBLISH_TESTPYPI: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'release' || inputs.publish_testpypi == 'true')) }}
+      TESTPYPI_BASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.testpypi_version || '0.1.1rc1' }}
 
     steps:
       - name: Check out repository
@@ -176,12 +179,60 @@ jobs:
       - name: Install build tooling
         run: python -m pip install --upgrade pip build
 
-      - name: Set TestPyPI version
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'release' || inputs.publish_testpypi == 'true') }}
-        env:
-          TESTPYPI_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.testpypi_version || '0.1.1rc1' }}
+      - name: Compute next TestPyPI rc version
+        id: testpypi_version
+        if: ${{ env.SHOULD_PUBLISH_TESTPYPI == 'true' }}
         run: |
-          sed -i -E "s/^version = \".*\"$/version = \"${TESTPYPI_VERSION}\"/" pyproject.toml
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          base_input = os.environ["TESTPYPI_BASE_VERSION"].strip()
+          match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:rc\d+)?", base_input)
+          if not match:
+              raise SystemExit(f"Invalid TestPyPI base version: {base_input!r}")
+
+          base_version = match.group(1)
+          pattern = re.compile(rf"^{re.escape(base_version)}rc(\d+)$")
+          releases: dict[str, object] = {}
+
+          try:
+              with urllib.request.urlopen("https://test.pypi.org/pypi/napview/json", timeout=20) as response:
+                  payload = json.load(response)
+              releases = payload.get("releases", {})
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+
+          max_rc = 0
+          for version in releases.keys():
+              version_match = pattern.fullmatch(version)
+              if version_match:
+                  rc_number = int(version_match.group(1))
+                  if rc_number > max_rc:
+                      max_rc = rc_number
+
+          next_version = f"{base_version}rc{max_rc + 1}"
+          pyproject_path = Path("pyproject.toml")
+          original_text = pyproject_path.read_text(encoding="utf-8")
+          updated_text, replacements = re.subn(
+              r'^version = ".*"$',
+              f'version = "{next_version}"',
+              original_text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if replacements != 1:
+              raise SystemExit("Could not update version field in pyproject.toml")
+          pyproject_path.write_text(updated_text, encoding="utf-8")
+          print(f"Selected TestPyPI version: {next_version}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output_file:
+              output_file.write(f"version={next_version}\n")
+          PY
           grep '^version = ' pyproject.toml
 
       - name: Build package
@@ -195,7 +246,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish to TestPyPI
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'release' || inputs.publish_testpypi == 'true') }}
+        if: ${{ env.SHOULD_PUBLISH_TESTPYPI == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
