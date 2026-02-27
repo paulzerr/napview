@@ -1,5 +1,5 @@
 # <i>napview</i>: real-time sleep scoring and analysis visualizer
-### v0.1.0<br> 
+### v0.1.1<br> 
 ```napview``` is a powerful and user-friendly software for automatic sleep stage classification in the sleep lab. It provides a real-time interface to deep learning machine learning algorithm output for sleep data analysis.<br>
 
 ```napview``` uses machine learning models to infer sleep parameters from incoming EEG data and visualizes the output, quantifying e.g., the probability of a sleep study participant to be in a particular sleep stage. 
@@ -186,4 +186,3 @@ If you have any questions, suggestions, or feedback, please feel free to reach o
 
 - Email: paul.zerr [ at ] donders.ru.nl
 <!-- - GitHub Issues: [napview/issues](https://github.com/napview/napview/issues) -->
-
