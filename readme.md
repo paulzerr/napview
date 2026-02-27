@@ -1,188 +1,143 @@
-# <i>napview</i>: real-time sleep scoring and analysis visualizer
-### v0.1.1<br> 
-```napview``` is a powerful and user-friendly software for automatic sleep stage classification in the sleep lab. It provides a real-time interface to deep learning machine learning algorithm output for sleep data analysis.<br>
+# NAPVIEW - An autoscoring visualizer for real-time sleep experiments.
 
-```napview``` uses machine learning models to infer sleep parameters from incoming EEG data and visualizes the output, quantifying e.g., the probability of a sleep study participant to be in a particular sleep stage. 
+[Read the manual here: napview.netlify.app](https://napview.netlify.app/)
 
-```napview``` runs independently of existing lab setups. 
+NAPVIEW is a user-friendly software for automatic real-time sleep stage classification in the sleep lab. It provides a real-time interface to deep learning machine learning algorithm output. It connects to live EEG data, runs automated sleep stage classification using powerful machine learning tools, and displays stage probabilities and signal features. NAPVIEW runs independently of existing lab setups and is intended to make the lives of researchers easier during live monitoring at night.
 
-```napview``` is the nightshift experimenter's friend. 
-
-
-## The GUI
-![GUI Screenshot](images/gui.png)
-
-
-## An example of the real-time display
-
-![Result Screenshot](images/result.png)
-
-
+At present NAPVIEW directly supports BrainVision and OpenBCI EEG hardware, but any EEG system that allows real-time signal streaming can be connected through a labstreaminglayer (LSL) connector.
 
 ## Installation
 
-Note: Windows users in restricted environments without admin rights can download a standalone release <a href="https://drive.google.com/file/d/1fGeBAwBIcwcncrhgBviIv79pLadaPtQc/view?usp=sharing">here</a>.
+### Option 1: [Download NAPVIEW installer (Windows)](https://github.com/paulzerr/napview/releases/latest/download/NAPVIEW_installer.exe)
 
+The easiest way to use napview on Windows is to download the portable self-extracting installer.
 
+**Note:** due to the restrictive environment of Windows, you may see a "Search on app store" popup window. Click "No". You may also see the blue Smartscreen warning. In that case click "More info" and then "run anyway". You can also right-click `NAPVIEW.exe`, go to Properties and tick the box "Unblock". Should this fail, try installing via the standalone archive or pip (see below).
 
-**1. Make sure you have [```Python 3.11```](https://www.python.org/downloads/) or later installed on your system.**<br>
+### Option 2: [Download NAPVIEW standalone (Windows)](https://github.com/paulzerr/napview/releases/latest/download/NAPVIEW_installer.zip)
 
+Download the zip archive, extract it to your preferred location, then double click `run_napview.bat` to start NAPVIEW. This installation method can be useful on systems without admin priviledges.
 
-**2. Clone the repository:**
-   
-Navigate to a directory of your choice, open a terminal or command prompt and download napview:
+### Option 3: Install as Python package
 
-   ```
-   git clone https://github.com/paulzerr/napview/
-   cd napview
-   ```
+First install e.g. [Miniconda](https://www.anaconda.com/download/success).
 
-**2. Create a new virtual environment:** 
+**Windows:**
 
-    python -m venv napview_venv
-
-or
-
-    python3 -m venv napview_venv
-
-<i>Note: using a virtual environment is not strictly necessary, but is strongly recommended to ensure compatibility. Installing napview requires approximately 350MB of hard drive space.</i><br>
-
-
-**3. Activate the virtual environment:**
-
-   Linux and macOS:
-     
-     source napview_venv/bin/activate
-
-   Windows:
-```
-napview_venv\Scripts\activate.bat rem for Command Prompt (cmd)
+```bash
+conda create -n napview-env python=3.11 -y
+conda activate napview-env
+pip install napview
 ```
 
+**macOS/Linux:**
+
+```bash
+conda create -n napview-env python=3.11 -y
+conda activate napview-env
+pip install napview
 ```
-napview_venv\Scripts\Activate.ps1 # for PowerShell
+
+**Launch NAPVIEW:**
+
+```bash
+conda activate napview-env
+napview
 ```
 
+**Note:** on first run, NAPVIEW may download model weights via the NIDRA backend.
 
-**4. Install napview:**
-   
-   ```
-   pip install -r requirements.txt
-   ```
+## GUI Guide
 
+### Graphical user interface (GUI)
 
-**5. Start napview**
+NAPVIEW launches a local control panel in your browser and opens a second tab for the real-time visualizer. The default control URL is `http://127.0.0.1:8145`. If that port is unavailable, NAPVIEW will pick the next free port. The browser window should open automatically.
 
-Option 1: From a terminal or command prompt:
-   
-   ```
-   napview
-   ```
+### Walkthrough
 
-Option 2: Navigate to the cloned repository and start napview from there:
+#### Step 1: Start NAPVIEW
 
-   ``` 
-   python3 -m src/napview/napview.py
-   ```
+Start `NAPVIEW.exe` or run `napview` in a terminal or command prompt. A browser window opens with the control panel.
 
+#### Step 2: Set data directory and record name
 
-## Dependencies
+Use the Data directory selector to choose where session files and outputs are stored. The default location is your user data directory under `napview/data`.
 
-These packages and their dependencies will automatically be installed via pip. Otherwise install manually.
+#### Step 3: Select data source
 
-    Scipy==1.14.1
-    numpy==2.1.2
-    mne==1.8.0
-    Flask==3.0.3
-    peewee==3.17.6
-    pylsl==1.16.2
-    usleep_api==0.1.3
-    setuptools==70.3.0
-    edfio==0.4.3
+- **Playback recording (simulator):** use the integrated example recording or select a local EDF file to simulate a live stream. The file is copied into the session data directory.
+- **BrainVision:** enter the IP and RDA port of the EEG acquisition PC. On Windows you can find the IP by opening a command prompt (`CTRL+R`, then type `cmd`, press Enter. Next, type `ipconfig`, press Enter, and look for an entry under "Ethernet adapter" or "Wireless LAN adapter Wi-Fi" if using Wi-Fi labeled "IPv4 Address"). The number shown next to IPv4 Address is the IP address of the EEG acquisition PC. The port is typically `51234`.
+- **OpenBCI:** choose a board type and port (if required). Use Synthetic to test without hardware.
+- **Custom LSL stream:** provide the LSL stream name (default in config is `napview_EEG_stream`).
+- **ZMax:** currently not implemented.
 
+#### Step 4: Select the sleep staging model
 
-## How to use ```napview```
+Choose the sleep staging model. Currently only `U-Sleep` is available, which is a reliable state-of-the-art autoscorer.
 
-**1.** Open a command window or terminal, type in ```napview``` and hit Enter. This will open the GUI in your default browser, usually at <a href=http://127.0.0.1:8145>http://127.0.0.1:8145</a>. A folder called "napview" will be created in your user directory. Temporary data, logs and output files will be stored there.
+#### Step 5: Optional settings
 
-**2.** Select your EEG amplifier as data source. Or you can try out ```napview``` with the built-in EEG simulator, which streams a recording from an .edf file. You can also connect to any ongoing LSL EEG stream.
+- **Analysis parameters:** e.g. adjust epoch length. This is currently not implemented and 30s epochs will always be used.
+- **Channel configuration:** select EEG channels to use. This is optional, as NAPVIEW will automatically detect channel type and will skip noisy or empty channels. During scoring all combinations between valid EEG and EOG channels are being used and scored individually. The final score is then determined by majority vote.
 
-**3.** Select your preferred sleep scoring model. U-Sleep is strongly recommended, but requires an internet connection and an API key, which can be requested for free at [https://sleep.ai.ku.dk/](https://sleep.ai.ku.dk/). YASA is an alternative model that doesn't require an API key. It needs about 15 minutes of recording time before it delivers accurate results.
+#### Step 6: Start streaming
 
-**4.** Follow further instructions displayed in red in the Status window on the right (if any).
+Click **START napview**. A new tab opens with the real-time visualizer, typically at `http://127.0.0.1:8245`. Sleep stage probabilities stabilize after several minutes of data. Less than 5 minutes of data will likely not result in reliable estimates. A maximum of 15 minutes of past data will be used.
 
-**5.** When everything is green, click START to begin. A new tab will open containing the data visualizer. This will typically be at [http://127.0.0.1:8245](http://127.0.0.1:8245). Sleep stage probabilities will be displayed as provided by the classifier, but it will take a few minutes for the sleep scoring output to become reliable. By default a new datapoint is shown every 30 seconds.
+#### Step 7: Shutdown and save
 
-Other data can be displayed, such as band power, eye movements, spindle/K density, heart rate, aperiodic slope, etc.
+Once the experiment session is finished, click **SHUTDOWN and save** to stop the session and write outputs.
 
-**6.** When you are done with the situation, click SHUTDOWN to end data streaming and save the recording. <br>
+## Notes
 
- <br>
-    
+- NAPVIEW expects a continuous EEG stream with channel names available from the stream metadata.
+- Use the Simulator to test the systemwith a static EDF file.
+- For BrainVision, make sure the RDA plugin is enabled and configured correctly.
+- For custom LSL streams, make sure the stream type is EEG and the name matches the value in the GUI.
+- It is recommended that you test the system first with the Simulator, then with an EEG amp connected without a participant, and finally with an awake participant. If everything works as expected you are now prepared to use NAPVIEW during an overnight session.
 
-## Using napview with OpenBCI GUI
+## Model Validation
 
-**1.** If you want to concurrently use the OpenBCI GUI, start the data stream, open the Networking widget and select the LSL protocol. 
+NAPVIEW uses the NIDRA backend for real-time scoring. The default staging model is U-Sleep, which has been validated in large multi-center datasets. For detailed performance metrics, refer to the original U-Sleep publication:
 
-**2.** In Stream 1, select TimeSeriesRaw as Data Type.
+[U-Sleep: resilient high-frequency sleep staging (Perslev et al., 2021)](https://www.nature.com/articles/s41746-021-00440-5)
 
-**3.** Click "Start LSL stream".
+## FAQ & Troubleshooting
 
-**4.** In napview, select CustomLSL stream as Data Source and enter the stream name.
+### GUI issues
 
+**Q: The GUI did not open.**  
+A: Check the terminal output for the correct URL, normally `http://127.0.0.1:8145`, and enter it manually in the browser. Otherwise check the logs, which should be in your user directory, e.g. `C:\Users\<your-username>\AppData\Local\napview\data`.
 
-## Using napview with OpenBCI directly
+**Q: The visualizer tab is empty or only shows a text message.**  
+A: This usually means the data stream has not started or there is no incoming data. Confirm the data source and check the status panel for red warnings. Otherwise check the logs.
 
-**1.** If you want to directly connect to an OpenBCI board, you can simply select your board type and port as Data Source.
+**Q: My BrainVision EEG amp does not connect.**  
+A: Verify the RDA plugin is enabled and the IP/port are correct.
 
+**Q: Custom LSL stream not found.**  
+A: Ensure the stream is running, the stream name matches exactly, and the stream type is EEG.
 
-## Using napview with BrainVision amplifiers
+## How to Cite NAPVIEW
 
-**1.** Start a recent version of Recorder.
+If you use NAPVIEW in your research, please cite the NAPVIEW repository and the underlying models.
 
-**2.** Make sure the RDA plugin is activated. You can activate it by going to the Options menu, selecting Data Transfer, and then enabling RDA. This allows external software to access data as it's being recorded.
+### 1. Citing NAPVIEW
 
-**3.** Obtain the IP address of the acquisition computer if you want to use napview on a different computer on the network, or the default 127.0.0.1 if you run napview on the same computer.
+```text
+Zerr, P. (2025). napview: real-time sleep scoring and analysis visualizer. GitHub. https://github.com/paulzerr/napview
+```
 
-**4.** Start the data stream in Recorder and select Brainvision as Data Source in napview. Enter the IP.
+### 2. Citing U-Sleep
 
-
-
-
-
-
-## Compatibility 
-
-- ```napview``` has been tested with BrainVision passive electrode EEG amplifiers on Kubuntu 24 Linux + Windows 10; Python 3.9 + 3.12, but should run on most systems as it is platform independent. Any system able to run python3 and a web browser should be compatible.
-
-- Any amplifier with real-time streaming capabilities can be used with napview via an [LSL connector script](https://labstreaminglayer.readthedocs.io/info/supported_devices.html). These are available for most EEG amps, or you can create your own with a few lines of Python code.
-
-- Napview runs independently of your lab setup. 
-
-- Feel free to contact us for assistance to make napview work in your lab setup.
-
-
-## TODO:
-
-- auto-reject bad channels
-- allow the user to choose channels for YASA sleep scoring
-- implement spindle, eye movement detection, etc
-- implement alerts for certain events (e.g., arousal)
-- add Docker install option
-
-<!-- ## Resources
-For detailed tutorials, examples, and additional resources, please refer to the following links:
-- [napview Documentation, tutorial and examples](https://napview.readthedocs.io/) -->
-
+```text
+Perslev, M., et al. (2021). U-Sleep: resilient high-frequency sleep staging. NPJ Digital Medicine.
+```
 
 ## License
 
-```napview``` is released under the [BSD-3 Clause License](https://github.com/paulzerr/napview/blob/master/LICENSE).
-
+This project is released under the BSD-3 Clause License.
 
 ## Contact
 
-If you have any questions, suggestions, or feedback, please feel free to reach out:
-
-- Email: paul.zerr [ at ] donders.ru.nl
-<!-- - GitHub Issues: [napview/issues](https://github.com/napview/napview/issues) -->
+For questions, bug reports, or feedback, please contact Paul Zerr at [paul.zerr@donders.ru.nl](mailto:paul.zerr@donders.ru.nl).
